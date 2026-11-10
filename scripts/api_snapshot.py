@@ -144,7 +144,9 @@ def _diff(old: list[str], new: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
+    parser = argparse.ArgumentParser(
+        allow_abbrev=False, description=__doc__.splitlines()[0] if __doc__ else ""
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--add", action="store_true")

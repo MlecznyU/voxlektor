@@ -4,14 +4,14 @@ set -euo pipefail
 
 cmd="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))')"
 
-git_re='(^|[;&|(`]|[[:space:]])git([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+(commit|push|reset|stash|rebase|checkout[[:space:]]+--)([[:space:]]|$)'
+git_re='(^|[^[:alnum:]_-])git([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+((commit|push|reset|stash|rebase)([^[:alnum:]_-]|$)|checkout([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+--([^[:alnum:]_-]|$))'
 if [[ "$cmd" =~ $git_re ]]; then
   echo "the owner commits — report instead" >&2
   exit 2
 fi
 
 msg="API changes need the owner's approval: file an API change request instead"
-if [[ "$cmd" =~ api_snapshot\.py.*--approve ]] || [[ "$cmd" =~ poe[[:space:]]+api-approve ]]; then
+if [[ "$cmd" =~ api_snapshot.*--ap ]] || [[ "$cmd" == *api-approve* ]]; then
   echo "$msg" >&2
   exit 2
 fi

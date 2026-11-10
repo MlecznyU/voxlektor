@@ -90,7 +90,7 @@ banned-module-level-imports = ["numpy", "mlx", "mlx_audio", "sounddevice", "soun
 [tool.coverage.run]
 branch = true
 source = ["voxlektor"]
-omit = ["*/adapters/engines/*_mlx.py", "*/adapters/audio/sounddevice_out.py"]
+omit = ["*/adapters/engines/*_mlx.py", "*/adapters/audio/sounddevice_out.py", "*/__main__.py"]
 
 [tool.coverage.report]
 fail_under = 95
