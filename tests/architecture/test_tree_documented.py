@@ -1,0 +1,75 @@
+"""Every production module must be listed in the section 2 map of docs/architecture.md."""
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+PACKAGE = ROOT / "src" / "voxlektor"
+ARCHITECTURE = ROOT / "docs" / "architecture.md"
+
+_BRACES = re.compile(r"^(?P<prefix>.*)\{(?P<names>[^}]*)\}(?P<suffix>.*)$")
+
+
+def _expand(token: str) -> list[str]:
+    match = _BRACES.match(token)
+    if match is None:
+        return [token]
+    names = match["names"].split(",")
+    return [f"{match['prefix']}{name}{match['suffix']}" for name in names]
+
+
+def documented_modules(text: str) -> set[str]:
+    """Parse the section 2 code block into package-relative ``.py`` paths."""
+    section = text.split("## 2.", 1)[1].split("\n## ", 1)[0]
+    block = section.split("```", 2)[1]
+    documented: set[str] = set()
+    context = ""
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("src/"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        token = stripped.split()[0]
+        if indent == 2 and token.endswith("/"):
+            context = token
+            continue
+        prefix = "" if indent == 2 else context
+        for path in _expand(token):
+            documented.add(f"{prefix}{path}")
+    return {path for path in documented if path.endswith(".py")}
+
+
+def test_every_module_is_in_architecture_map() -> None:
+    documented = documented_modules(ARCHITECTURE.read_text())
+    actual = {
+        path.relative_to(PACKAGE).as_posix()
+        for path in PACKAGE.rglob("*.py")
+        if path.name != "__init__.py"
+    }
+    missing = sorted(actual - documented)
+    assert not missing, f"modules missing from docs/architecture.md section 2: {missing}"
+
+
+def test_parser_understands_the_map_notation() -> None:
+    text = (
+        "## 2. Tree\n\n```\nsrc/voxlektor/\n"
+        "  __main__.py   entry\n"
+        "  domain/       PURE\n"
+        "    types.py    t\n"
+        "    text/chunking.py  c\n"
+        "  entrypoints/\n"
+        "    cli/{app,speak}.py\n"
+        "```\n\n## 3. Next\n"
+    )
+    assert documented_modules(text) == {
+        "__main__.py",
+        "domain/types.py",
+        "domain/text/chunking.py",
+        "entrypoints/cli/app.py",
+        "entrypoints/cli/speak.py",
+    }
+
+
+def test_undocumented_module_would_be_detected() -> None:
+    text = "## 2. Tree\n\n```\n  domain/\n    types.py  t\n```\n"
+    assert "domain/extra.py" not in documented_modules(text)

@@ -1,0 +1,199 @@
+[project]
+name = "voxlektor"
+version = "0.1.0"
+description = "Local text-to-speech service and CLI"
+readme = "README.md"
+authors = [
+    { name = "toma", email = "toma.herc@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-audio==0.6.4",
+    "mlx",
+    "msgspec",
+    "sounddevice",
+    "numpy",
+    "soundfile",
+    "pytsmod",
+    "typer",
+    "tomli-w",
+]
+
+[project.scripts]
+voxlektor = "voxlektor.entrypoints.cli.app:main"
+vxl = "voxlektor.entrypoints.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "hypothesis",
+    "pyright",
+    "ruff",
+    "import-linter>=2.1",
+    "poethepoet",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not model and not audio'"
+markers = [
+    "model: needs a real model download and Apple Silicon (run with -m model)",
+    "audio: needs a real audio device (run with -m audio)",
+    "e2e: end-to-end test through the real CLI and daemon",
+]
+
+# ---------------------------------------------------------------- pyright
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+include = ["src", "tests", "scripts"]
+stubPath = "typings"
+reportImportCycles = true
+reportMissingTypeStubs = "error"
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PT", "TID", "ANN", "S", "PL"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+banned-module-level-imports = ["numpy", "mlx", "mlx_audio", "sounddevice", "soundfile", "pytsmod"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"threading".msg = "Threads belong to voxlektor.runtime, adapters and entrypoints only."
+"asyncio".msg = "asyncio belongs to voxlektor.runtime, adapters and entrypoints only."
+"subprocess".msg = "subprocess belongs to voxlektor.runtime, adapters and entrypoints only."
+"socket".msg = "socket belongs to voxlektor.runtime, adapters and entrypoints only."
+"logging.handlers".msg = "Log handlers (I/O) belong to voxlektor.runtime, adapters and entrypoints only (import-linter cannot forbid this stdlib submodule)."
+
+[tool.ruff.lint.per-file-ignores]
+# Banned APIs (TID251) and banned module-level imports (TID253).
+"src/voxlektor/runtime/**" = ["TID251"]
+"src/voxlektor/adapters/**" = ["TID251", "TID253"]
+"src/voxlektor/entrypoints/**" = ["TID251"]
+"src/voxlektor/runtime/buffers.py" = ["TID253"]
+"src/voxlektor/contracts/engine.py" = ["TID253"]
+"src/voxlektor/testing/**" = ["TID251", "TID253"]
+"tests/**" = ["TID251", "TID253", "S101", "PLR2004"]
+"scripts/**" = ["TID251", "TID253", "S101", "ANN401"]
+
+# ---------------------------------------------------------------- coverage
+[tool.coverage.run]
+branch = true
+source = ["voxlektor"]
+omit = ["*/adapters/engines/*_mlx.py", "*/adapters/audio/sounddevice_out.py"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@overload",
+    "raise NotImplementedError",
+    "assert_never",
+    "^\\s*\\.\\.\\.$",
+]
+
+# ---------------------------------------------------------------- poe
+[tool.poe.tasks]
+lint = "ruff check ."
+fmt = "ruff format --check ."
+imports = "lint-imports"
+types = "pyright"
+test = "pytest --cov --cov-report=term-missing"
+core-cov = "coverage report --include='src/voxlektor/domain/*,src/voxlektor/app/*,src/voxlektor/contracts/*' --fail-under=100"
+api-check = "python scripts/api_snapshot.py --check"
+api-add = "python scripts/api_snapshot.py --add"
+api-approve = "python scripts/api_snapshot.py --approve"
+check = ["lint", "fmt", "imports", "types", "api-check", "test", "core-cov"]
+check-fast = ["lint", "imports", "types", "api-check", { cmd = "pytest -x -q" }]
+
+# ---------------------------------------------------------------- import-linter
+[tool.importlinter]
+root_packages = ["voxlektor"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+containers = ["voxlektor"]
+layers = ["entrypoints", "bootstrap", "adapters | runtime", "app", "domain | contracts"]
+exhaustive = true
+exhaustive_ignores = ["testing", "bundled_voices", "__main__"]
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure and synchronous"
+type = "forbidden"
+source_modules = ["voxlektor.domain"]
+forbidden_modules = ["asyncio", "threading", "concurrent", "multiprocessing", "socket", "subprocess", "selectors", "os", "shutil", "tempfile", "importlib", "numpy", "mlx", "mlx_audio", "torch", "sounddevice", "soundfile", "pytsmod", "msgspec", "tomllib", "tomli_w", "typer", "huggingface_hub"]
+
+[[tool.importlinter.contracts]]
+name = "App has no concurrency or technology"
+type = "forbidden"
+source_modules = ["voxlektor.app"]
+forbidden_modules = ["asyncio", "threading", "concurrent", "multiprocessing", "socket", "subprocess", "mlx", "mlx_audio", "torch", "sounddevice", "soundfile", "pytsmod", "tomllib", "tomli_w", "typer", "huggingface_hub", "importlib", "voxlektor.contracts.protocol", "voxlektor.contracts.codec"]
+
+[[tool.importlinter.contracts]]
+name = "Protocol contract is self-contained"
+type = "forbidden"
+source_modules = ["voxlektor.contracts.protocol", "voxlektor.contracts.codec"]
+forbidden_modules = ["numpy", "voxlektor.domain", "voxlektor.contracts.engine", "voxlektor.contracts.voicefmt"]
+
+[[tool.importlinter.contracts]]
+name = "Contracts are mutually independent"
+type = "independence"
+modules = ["voxlektor.contracts.protocol", "voxlektor.contracts.engine", "voxlektor.contracts.voicefmt"]
+ignore_imports = ["voxlektor.contracts.codec -> voxlektor.contracts.protocol"]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "Runtime is technology-agnostic"
+type = "forbidden"
+source_modules = ["voxlektor.runtime"]
+forbidden_modules = ["mlx", "mlx_audio", "torch", "sounddevice", "soundfile", "pytsmod", "typer", "socket", "subprocess", "huggingface_hub"]
+
+[[tool.importlinter.contracts]]
+name = "ML frameworks only in engine adapters"
+type = "forbidden"
+source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.audio", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.bootstrap", "voxlektor.entrypoints"]
+forbidden_modules = ["mlx", "mlx_audio", "torch"]
+
+[[tool.importlinter.contracts]]
+name = "Audio libs only in audio adapters"
+type = "forbidden"
+source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.engines", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.bootstrap", "voxlektor.entrypoints"]
+forbidden_modules = ["sounddevice", "soundfile", "pytsmod"]
+
+[[tool.importlinter.contracts]]
+name = "Adapter families are independent"
+type = "independence"
+modules = ["voxlektor.adapters.engines", "voxlektor.adapters.audio", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs"]
+
+[[tool.importlinter.contracts]]
+name = "Engines are discovered, never imported"
+type = "forbidden"
+source_modules = ["voxlektor.bootstrap", "voxlektor.entrypoints", "voxlektor.runtime", "voxlektor.app"]
+forbidden_modules = ["voxlektor.adapters.engines"]
+
+[[tool.importlinter.contracts]]
+name = "CLI control path is lightweight"
+type = "forbidden"
+source_modules = ["voxlektor.entrypoints.cli"]
+forbidden_modules = ["numpy", "asyncio", "voxlektor.runtime", "voxlektor.adapters.audio", "voxlektor.bootstrap.daemon"]
+ignore_imports = ["voxlektor.entrypoints.cli.speak -> voxlektor.entrypoints.oneshot"]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "Production does not import the test kit"
+type = "forbidden"
+source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters", "voxlektor.bootstrap", "voxlektor.entrypoints"]
+forbidden_modules = ["voxlektor.testing"]

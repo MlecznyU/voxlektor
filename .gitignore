@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.coverage
+htmlcov/
+*.wav
+!src/voxlektor/bundled_voices/**
+.superpowers/
+.pytest_cache/
+.ruff_cache/
+.idea/
