@@ -1,4 +1,9 @@
+voxlektor.adapters.audio.cues:SoundDeviceCuePlayer() -> None
+voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.close(self) -> None
+voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
 voxlektor.adapters.audio.dsp:time_stretch(samples: NDArray[numpy.float32], rate: float) -> NDArray[numpy.float32]
+voxlektor.adapters.audio.memory_out:MemoryCuePlayer() -> None
+voxlektor.adapters.audio.memory_out:MemoryCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
 voxlektor.adapters.audio.memory_out:MemoryOutput(auto_complete: bool = True) -> None
 voxlektor.adapters.audio.memory_out:MemoryOutput.abort(self) -> None
 voxlektor.adapters.audio.memory_out:MemoryOutput.complete(self, chunk: voxlektor.domain.types.ChunkId) -> None
@@ -50,6 +55,7 @@ voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: s
 voxlektor.adapters.transport.mapping:error_reply(err: voxlektor.contracts.codec.ProtocolError) -> voxlektor.contracts.protocol.Reply
 voxlektor.adapters.transport.mapping:to_command(req: Request) -> Command
 voxlektor.adapters.transport.mapping:to_wire_reply(req_id: str, reply: voxlektor.app.effects.Reply) -> voxlektor.contracts.protocol.Reply
+voxlektor.adapters.transport.unix_server:serve_unix(path: pathlib.Path, handler: _Handler, *, on_ready: collections.abc.Callable[[], None] | None) -> asyncio.base_events.Server
 voxlektor.app.commands:Back() -> None
 voxlektor.app.commands:Command = Command
 voxlektor.app.commands:Pause() -> None
@@ -108,6 +114,8 @@ voxlektor.app.ports:AudioOutput.set_callbacks(self, on_done: collections.abc.Cal
 voxlektor.app.ports:AudioOutput.start(self, chunk: voxlektor.domain.types.ChunkId, samples: object, sample_rate: int) -> None
 voxlektor.app.ports:Clock(*args, **kwargs)
 voxlektor.app.ports:Clock.now(self) -> float
+voxlektor.app.ports:CuePlayer(*args, **kwargs)
+voxlektor.app.ports:CuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
 voxlektor.app.ports:EngineProvider(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
@@ -137,11 +145,14 @@ voxlektor.app.session:Session.on_prompt_failed(self, voice: str, msg: str) -> li
 voxlektor.app.session:Session.on_prompt_ready(self, voice: str) -> list[Effect]
 voxlektor.app.session:Session.on_unloaded(self) -> list[Effect]
 voxlektor.app.session:Session.on_wake(self) -> list[Effect]
-voxlektor.app.voice_prompts:get_or_build_prompt(engine: voxlektor.contracts.engine.Engine, repo: voxlektor.app.ports.VoiceRepository, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.app.voice_prompts:get_or_build_prompt(engine: voxlektor.contracts.engine.Engine, repo: voxlektor.app.ports.VoiceRepository, ref: voxlektor.contracts.engine.VoiceRef, *, fresh: bool = False) -> voxlektor.contracts.engine.VoicePrompt
 voxlektor.app.voices:VoiceCatalog(repo: voxlektor.app.ports.VoiceRepository) -> None
 voxlektor.app.voices:VoiceCatalog.ensure_bundled(self) -> None
 voxlektor.app.voices:VoiceCatalog.list(self) -> list[str]
 voxlektor.app.voices:VoiceCatalog.resolve(self, name: str) -> voxlektor.contracts.engine.VoiceRef
+voxlektor.bootstrap.daemon:Daemon(*args, **kwargs)
+voxlektor.bootstrap.daemon:Daemon.run(self) -> None
+voxlektor.bootstrap.daemon:build_daemon(settings: voxlektor.domain.settings.Settings, *, transport: bool, platform: voxlektor.app.ports.PlatformInfo | None = None, output: voxlektor.app.ports.AudioOutput | None = None, cues: voxlektor.app.ports.CuePlayer | None = None) -> voxlektor.bootstrap.daemon.Daemon
 voxlektor.bootstrap.environment:prepare() -> None
 voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str, macos_version: str) -> voxlektor.app.ports.PlatformInfo
 voxlektor.bootstrap.registry:load_engine(engine_id: str) -> voxlektor.contracts.engine.Engine
@@ -338,6 +349,19 @@ voxlektor.domain.types:ChunkId(x, /)
 voxlektor.domain.types:EngineId(x, /)
 voxlektor.domain.types:Epoch(x, /)
 voxlektor.domain.types:VoiceName(x, /)
+voxlektor.entrypoints.daemon:serve(settings: voxlektor.domain.settings.Settings) -> int
+voxlektor.runtime.buffers:AudioBuffers(max_items: int = 8) -> None
+voxlektor.runtime.buffers:AudioBuffers.drop(self, ids: collections.abc.Iterable[voxlektor.domain.types.ChunkId]) -> None
+voxlektor.runtime.buffers:AudioBuffers.put(self, chunk_id: voxlektor.domain.types.ChunkId, audio: voxlektor.contracts.engine.AudioChunk) -> None
+voxlektor.runtime.buffers:AudioBuffers.take(self, chunk_id: voxlektor.domain.types.ChunkId) -> voxlektor.contracts.engine.AudioChunk
+voxlektor.runtime.engine_worker:EngineWorker(provider: 'EngineProvider', repo: 'VoiceRepository', stretch: 'Callable[[npt.NDArray[np.float32], float], npt.NDArray[np.float32]]') -> 'None'
+voxlektor.runtime.engine_worker:EngineWorker.cancel_before(self, epoch: voxlektor.domain.types.Epoch) -> None
+voxlektor.runtime.engine_worker:EngineWorker.close(self) -> None
+voxlektor.runtime.engine_worker:EngineWorker.submit(self, job: voxlektor.app.effects.LoadEngine | voxlektor.app.effects.UnloadEngine | voxlektor.app.effects.PrepareVoice | voxlektor.app.effects.Generate, on_result: collections.abc.Callable[[tuple[voxlektor.contracts.engine.AudioChunk, float] | None], None], on_error: collections.abc.Callable[[str], None]) -> None
+voxlektor.runtime.loop:CoreLoop(session: voxlektor.app.session.Session, worker: voxlektor.runtime.engine_worker.EngineWorker, output: voxlektor.app.ports.AudioOutput, buffers: voxlektor.runtime.buffers.AudioBuffers, clock: voxlektor.app.ports.Clock, cues: voxlektor.app.ports.CuePlayer) -> None
+voxlektor.runtime.loop:CoreLoop.execute(self, effects: list[Effect]) -> None
+voxlektor.runtime.loop:CoreLoop.handle(self, cmd: Command) -> voxlektor.app.effects.Reply
+voxlektor.runtime.loop:CoreLoop.run_until_stopped(self) -> None
 voxlektor.testing.engine_contract:run_engine_contract(engine: voxlektor.contracts.engine.Engine, ref: voxlektor.contracts.engine.VoiceRef) -> None
 voxlektor.testing.fakes:FakeClock(t: float = 0.0) -> None
 voxlektor.testing.fakes:FakeClock.advance(self, s: float) -> None

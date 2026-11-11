@@ -35,6 +35,18 @@ def test_corrupt_cache_is_rebuilt_and_overwritten() -> None:
     assert engine.prepare_calls == 1
 
 
+def test_fresh_skips_the_cache_and_overwrites_it() -> None:
+    engine, repo = _loaded_engine(), InMemoryVoiceRepository([REF])
+    stale = VoicePrompt("v1", 1, "stale prompt")
+    repo.write_cache("v1", KEY, engine.serialize_prompt(stale))
+    prompt = get_or_build_prompt(engine, repo, REF, fresh=True)
+    assert prompt == VoicePrompt("v1", 1, "reference transcript")
+    assert engine.prepare_calls == 1
+    assert repo.read_cache("v1", KEY) == engine.serialize_prompt(prompt)
+    assert get_or_build_prompt(engine, repo, REF) == prompt  # the cache now holds the new one
+    assert engine.prepare_calls == 1
+
+
 def test_cache_is_keyed_by_engine_revision_and_format() -> None:
     engine, repo = _loaded_engine(), InMemoryVoiceRepository([REF])
     get_or_build_prompt(engine, repo, REF)

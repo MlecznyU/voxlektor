@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from voxlektor.app.effects import Cue
 from voxlektor.contracts.engine import Engine, VoiceRef
 from voxlektor.domain.types import ChunkId
 
@@ -32,6 +33,12 @@ class AudioOutput(Protocol):
     def resume(self) -> None: ...
 
     def abort(self) -> None: ...
+
+
+class CuePlayer(Protocol):
+    """Plays a short cue next to the reading (also while it is paused); never raises."""
+
+    def play(self, cue: Cue) -> None: ...
 
 
 class SettingsStore(Protocol):

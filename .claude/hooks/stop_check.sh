@@ -24,7 +24,8 @@ fi
 
 # Keep only the section of the step that failed (from the last "Poe =>" line).
 failed="$(printf '%s\n' "$out" | awk '/^Poe => /{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}')"
-digest="$(printf '%s' "$failed" | shasum | cut -d' ' -f1)"
+# Digits are dropped before hashing: timings and file counts change between runs.
+digest="$(printf '%s' "$failed" | tr -d '0-9' | shasum | cut -d' ' -f1)"
 
 if [ -f "$last_file" ] && [ "$(cat "$last_file")" = "$digest" ]; then
   exit 0

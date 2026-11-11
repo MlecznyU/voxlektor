@@ -1,11 +1,23 @@
-"""AudioOutput without a device: records calls, completes chunks on demand or immediately.
+"""Device-less audio adapters: an AudioOutput and a CuePlayer that only record.
 
-Production adapter (selected by ``VOXLEKTOR_OUTPUT=memory``); also the output used by tests.
+``MemoryOutput`` completes chunks on demand or immediately. Production adapters (selected by
+``VOXLEKTOR_OUTPUT=memory``); also used by tests. This module never imports an audio library.
 """
 
 from collections.abc import Callable
 
+from voxlektor.app.effects import Cue
 from voxlektor.domain.types import ChunkId
+
+
+class MemoryCuePlayer:
+    """Records the cues it is asked to play."""
+
+    def __init__(self) -> None:
+        self.played: list[Cue] = []
+
+    def play(self, cue: Cue) -> None:
+        self.played.append(cue)
 
 
 class MemoryOutput:

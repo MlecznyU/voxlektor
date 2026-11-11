@@ -4,6 +4,7 @@ __pycache__/
 htmlcov/
 *.wav
 !src/voxlektor/bundled_voices/**
+!src/voxlektor/bundled_cues/**
 .superpowers/
 .pytest_cache/
 .ruff_cache/

@@ -178,6 +178,12 @@ name = "Audio libs only in audio adapters"
 type = "forbidden"
 source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.engines", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.bootstrap", "voxlektor.entrypoints"]
 forbidden_modules = ["sounddevice", "soundfile", "pytsmod"]
+# Wiring picks the concrete audio adapters (owner ruling K1, Task 9).
+ignore_imports = [
+    "voxlektor.bootstrap.daemon -> voxlektor.adapters.audio.sounddevice_out",
+    "voxlektor.bootstrap.daemon -> voxlektor.adapters.audio.dsp",
+    "voxlektor.bootstrap.daemon -> voxlektor.adapters.audio.cues",
+]
 
 [[tool.importlinter.contracts]]
 name = "Adapter families are independent"
