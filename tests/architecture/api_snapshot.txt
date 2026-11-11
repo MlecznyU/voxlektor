@@ -14,6 +14,12 @@ voxlektor.adapters.storage.settings_toml:TomlSettingsStore(path: pathlib.Path, e
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_env(self) -> dict[str, object]
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_file(self) -> dict[str, object]
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.write_value(self, key: str, value: str) -> None
+voxlektor.adapters.storage.voices_fs:FsVoiceRepository(root: pathlib.Path) -> None
+voxlektor.adapters.storage.voices_fs:FsVoiceRepository.install_bundled(self) -> None
+voxlektor.adapters.storage.voices_fs:FsVoiceRepository.names(self) -> list[str]
+voxlektor.adapters.storage.voices_fs:FsVoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
+voxlektor.adapters.storage.voices_fs:FsVoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
+voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
 voxlektor.app.ports:PlatformInfo(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.log_path(self) -> pathlib.Path
@@ -24,7 +30,34 @@ voxlektor.app.ports:SettingsStore(*args, **kwargs)
 voxlektor.app.ports:SettingsStore.read_env(self) -> dict[str, object]
 voxlektor.app.ports:SettingsStore.read_file(self) -> dict[str, object]
 voxlektor.app.ports:SettingsStore.write_value(self, key: str, value: str) -> None
+voxlektor.app.ports:VoiceRepository(*args, **kwargs)
+voxlektor.app.ports:VoiceRepository.install_bundled(self) -> None
+voxlektor.app.ports:VoiceRepository.names(self) -> list[str]
+voxlektor.app.ports:VoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
+voxlektor.app.ports:VoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
+voxlektor.app.ports:VoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
+voxlektor.app.voices:VoiceCatalog(repo: voxlektor.app.ports.VoiceRepository) -> None
+voxlektor.app.voices:VoiceCatalog.ensure_bundled(self) -> None
+voxlektor.app.voices:VoiceCatalog.list(self) -> list[str]
+voxlektor.app.voices:VoiceCatalog.resolve(self, name: str) -> voxlektor.contracts.engine.VoiceRef
 voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str, macos_version: str) -> voxlektor.app.ports.PlatformInfo
+voxlektor.contracts.engine:VoiceRef(name: str, ref_wav: pathlib.Path, ref_text: str) -> None
+voxlektor.contracts.engine:VoiceRef.name: str
+voxlektor.contracts.engine:VoiceRef.ref_text: str
+voxlektor.contracts.engine:VoiceRef.ref_wav: pathlib.Path
+voxlektor.contracts.voicefmt:CACHE_DIR = 'cache'
+voxlektor.contracts.voicefmt:MAX_REF_SECONDS = 30
+voxlektor.contracts.voicefmt:META = 'voice.toml'
+voxlektor.contracts.voicefmt:REF_TXT = 'ref.txt'
+voxlektor.contracts.voicefmt:REF_WAV = 'ref.wav'
+voxlektor.contracts.voicefmt:VOICE_FORMAT = 1
+voxlektor.contracts.voicefmt:VoiceMeta(format: int, name: str, source: Literal['bundled', 'clone', 'design'], lang: str, created: str) -> None
+voxlektor.contracts.voicefmt:VoiceMeta.created: str
+voxlektor.contracts.voicefmt:VoiceMeta.format: int
+voxlektor.contracts.voicefmt:VoiceMeta.lang: str
+voxlektor.contracts.voicefmt:VoiceMeta.name: str
+voxlektor.contracts.voicefmt:VoiceMeta.source: Literal['bundled', 'clone', 'design']
+voxlektor.contracts.voicefmt:prompt_cache_name(engine_id: str, revision: str, prompt_format: int) -> str
 voxlektor.domain.errors:DomainError(code: str, message: str) -> None
 voxlektor.domain.errors:InvalidDuration(message: str) -> None
 voxlektor.domain.errors:InvalidSetting(message: str) -> None

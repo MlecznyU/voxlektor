@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Protocol
 
+from voxlektor.contracts.engine import VoiceRef
+
 
 class SettingsStore(Protocol):
     def read_file(self) -> dict[str, object]: ...
@@ -22,3 +24,17 @@ class PlatformInfo(Protocol):
     def log_path(self) -> Path: ...
 
     def pid_path(self) -> Path: ...
+
+
+class VoiceRepository(Protocol):
+    def names(self) -> list[str]: ...
+
+    def ref(self, name: str) -> VoiceRef: ...
+
+    def read_cache(self, name: str, key: str) -> bytes | None: ...
+
+    def write_cache(self, name: str, key: str, data: bytes) -> None: ...
+
+    def install_bundled(self) -> None:
+        """Copy bundled voices that are missing; never overwrite anything."""
+        ...

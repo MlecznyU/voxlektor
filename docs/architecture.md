@@ -61,7 +61,7 @@ src/voxlektor/
     engines/omnivoice_mlx.py  OmniVoice via mlx-audio; pinned revision; returns numpy copies; NO file I/O
     audio/sounddevice_out.py  AudioOutput on a PortAudio callback; pause = silence
     audio/dsp.py              time_stretch() (pytsmod WSOLA)
-    storage/voices_fs.py      on-disk VoiceRepository per contracts.voicefmt
+    storage/voices_fs.py      on-disk VoiceRepository per contracts.voicefmt; bundled voices via importlib.resources; atomic cache writes
     storage/settings_toml.py  SettingsStore: TOML + VOXLEKTOR_*
     platform/macos.py         paths (0700), hardware
     platform/unsupported.py   "platform not supported yet"
