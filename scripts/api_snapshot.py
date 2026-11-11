@@ -32,6 +32,8 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.domain.types",
     "voxlektor.domain.errors",
     "voxlektor.domain.settings",
+    "voxlektor.domain.text.chunking",
+    "voxlektor.domain.text.lang",
     "voxlektor.app.ports",
     "voxlektor.adapters.storage.settings_toml",
     "voxlektor.adapters.platform.macos",

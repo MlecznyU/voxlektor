@@ -19,6 +19,13 @@ def test_defaults() -> None:
     assert (settings.engine, settings.voice, settings.lang) == ("omnivoice", "v0-default", "auto")
     assert (settings.rate, settings.idle_timeout_s, settings.autostart) == (1.0, 600, True)
     assert (settings.history, settings.ahead) == (20, 2)
+    assert settings.base_lang == "pl"
+
+
+def test_base_lang_precedence() -> None:
+    assert merge_layers({"base_lang": "en"}).base_lang == "en"
+    assert merge_layers({"base_lang": "en"}, {"base_lang": "pl"}).base_lang == "pl"
+    assert merge_layers({"base_lang": "en"}, {"lang": "pl"}).base_lang == "en"
 
 
 def test_precedence_defaults_file_env_flags() -> None:
@@ -39,6 +46,7 @@ def test_all_keys_are_applied() -> None:
             "engine": "fake",
             "voice": "ola",
             "lang": "pl",
+            "base_lang": "en",
             "rate": 2,
             "history": 5,
             "idle_timeout": "1h",
@@ -49,6 +57,7 @@ def test_all_keys_are_applied() -> None:
         engine=EngineId("fake"),
         voice=VoiceName("ola"),
         lang="pl",
+        base_lang="en",
         rate=2.0,
         history=5,
         idle_timeout_s=3600,
@@ -69,6 +78,9 @@ def test_idle_timeout_accepts_seconds_int() -> None:
         {"rate": "fast"},
         {"rate": True},
         {"lang": "de"},
+        {"base_lang": "auto"},
+        {"base_lang": "de"},
+        {"base_lang": None},
         {"history": 0},
         {"history": 1.5},
         {"history": True},

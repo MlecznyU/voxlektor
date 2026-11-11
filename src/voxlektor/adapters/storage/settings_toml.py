@@ -12,12 +12,13 @@ from voxlektor.domain.errors import InvalidDuration, InvalidSetting
 from voxlektor.domain.settings import merge_layers, parse_duration
 
 _CONFIG_VERSION = 1
-_TOP_KEYS = ("engine", "voice", "lang", "rate", "history")
+_TOP_KEYS = ("engine", "voice", "lang", "base_lang", "rate", "history")
 _SERVICE_KEYS = ("idle_timeout", "autostart")
 _ENV_NAMES = {
     "engine": "VOXLEKTOR_ENGINE",
     "voice": "VOXLEKTOR_VOICE",
     "lang": "VOXLEKTOR_LANG",
+    "base_lang": "VOXLEKTOR_BASE_LANG",
     "rate": "VOXLEKTOR_RATE",
     "idle_timeout": "VOXLEKTOR_IDLE_TIMEOUT",
     "autostart": "VOXLEKTOR_AUTOSTART",
@@ -46,7 +47,9 @@ def _coerce(key: str, raw: str, source: str) -> str | int | float | bool:
                 if not digits:
                     parse_duration(raw)
                 return int(raw) if digits else raw
-            case "engine" | "voice" | "lang":
+            case "engine" | "voice" | "lang" | "base_lang":
+                if key == "base_lang" and raw not in ("pl", "en"):
+                    raise ValueError(raw)
                 return raw
             case _:
                 raise InvalidSetting(f"unknown setting {key!r}")

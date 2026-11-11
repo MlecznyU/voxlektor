@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from voxlektor.domain.errors import InvalidDuration, InvalidSetting
-from voxlektor.domain.types import EngineId, LangPref, VoiceName
+from voxlektor.domain.types import EngineId, Lang, LangPref, VoiceName
 
 _DURATION = re.compile(r"([0-9]+)([smh])", re.ASCII)
 _UNITS = {"s": 1, "m": 60, "h": 3600}
@@ -21,6 +21,7 @@ class Settings:
     engine: EngineId = _DEFAULT_ENGINE
     voice: VoiceName = _DEFAULT_VOICE
     lang: LangPref = "auto"
+    base_lang: Lang = "pl"
     rate: float = 1.0
     idle_timeout_s: int = 600
     autostart: bool = True
@@ -65,6 +66,14 @@ def _lang(value: object) -> LangPref:
     raise InvalidSetting("lang must be one of auto, pl, en")
 
 
+def _base_lang(value: object) -> Lang:
+    if value == "pl":
+        return "pl"
+    if value == "en":
+        return "en"
+    raise InvalidSetting("base_lang must be one of pl, en")
+
+
 def _idle_timeout(value: object) -> int:
     if isinstance(value, bool):
         raise InvalidSetting("idle_timeout must be a duration or seconds")
@@ -88,6 +97,7 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
         merged.update(layer)
     base = Settings()
     engine, voice, lang = base.engine, base.voice, base.lang
+    base_lang = base.base_lang
     rate, idle_timeout_s = base.rate, base.idle_timeout_s
     autostart, history = base.autostart, base.history
     for key, value in merged.items():
@@ -98,6 +108,8 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
                 voice = VoiceName(_text(key, value))
             case "lang":
                 lang = _lang(value)
+            case "base_lang":
+                base_lang = _base_lang(value)
             case "rate":
                 rate = _rate(value)
             case "history":
@@ -112,6 +124,7 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
         engine=engine,
         voice=voice,
         lang=lang,
+        base_lang=base_lang,
         rate=rate,
         idle_timeout_s=idle_timeout_s,
         autostart=autostart,

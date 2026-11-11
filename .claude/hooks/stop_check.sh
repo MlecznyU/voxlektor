@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Stop: run the fast gate when source or tests changed; feed failures back to Claude.
+# A failure is reported once: the same failing output again stays silent.
+# Only the failing step's section is shown, capped at 15 lines.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -13,8 +15,21 @@ if [ -z "$(git status --porcelain -- src tests)" ]; then
   exit 0
 fi
 
-if ! out="$(uv run poe check-fast 2>&1)"; then
-  printf '%s\n' "$out" | tail -n 40 >&2
-  exit 2
+last_file="$(git rev-parse --git-dir)/stop_check.last"
+
+if out="$(uv run poe check-fast 2>&1)"; then
+  rm -f "$last_file"
+  exit 0
 fi
-exit 0
+
+# Keep only the section of the step that failed (from the last "Poe =>" line).
+failed="$(printf '%s\n' "$out" | awk '/^Poe => /{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}')"
+digest="$(printf '%s' "$failed" | shasum | cut -d' ' -f1)"
+
+if [ -f "$last_file" ] && [ "$(cat "$last_file")" = "$digest" ]; then
+  exit 0
+fi
+printf '%s\n' "$digest" > "$last_file"
+
+printf '%s\n' "$failed" | head -n 15 >&2
+exit 2

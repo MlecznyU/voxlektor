@@ -30,9 +30,10 @@ voxlektor.domain.errors:InvalidDuration(message: str) -> None
 voxlektor.domain.errors:InvalidSetting(message: str) -> None
 voxlektor.domain.errors:PlatformError(message: str = 'platform not supported yet') -> None
 voxlektor.domain.errors:UnknownVoice(name: str, available: tuple[str, ...]) -> None
-voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', rate: float = 1.0, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
+voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', base_lang: Literal['pl', 'en'] = 'pl', rate: float = 1.0, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
 voxlektor.domain.settings:Settings.ahead: int
 voxlektor.domain.settings:Settings.autostart: bool
+voxlektor.domain.settings:Settings.base_lang: Literal['pl', 'en']
 voxlektor.domain.settings:Settings.engine: voxlektor.domain.types.EngineId
 voxlektor.domain.settings:Settings.history: int
 voxlektor.domain.settings:Settings.idle_timeout_s: int
@@ -41,6 +42,8 @@ voxlektor.domain.settings:Settings.rate: float
 voxlektor.domain.settings:Settings.voice: voxlektor.domain.types.VoiceName
 voxlektor.domain.settings:merge_layers(*layers: collections.abc.Mapping[str, object]) -> voxlektor.domain.settings.Settings
 voxlektor.domain.settings:parse_duration(s: str) -> int
+voxlektor.domain.text.chunking:split_text(text: str, max_chars: int = 300, merge_below: int = 60) -> list[str]
+voxlektor.domain.text.lang:detect_lang(text: str, fallback: Literal['pl', 'en']) -> Literal['pl', 'en']
 voxlektor.domain.types:ChunkId(x, /)
 voxlektor.domain.types:EngineId(x, /)
 voxlektor.domain.types:Epoch(x, /)

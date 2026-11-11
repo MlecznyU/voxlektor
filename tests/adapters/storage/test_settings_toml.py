@@ -18,13 +18,15 @@ def test_missing_file_reads_empty(tmp_path: Path) -> None:
 
 def test_read_file_layout(tmp_path: Path) -> None:
     (tmp_path / "config.toml").write_text(
-        'config_version = 1\nengine = "fake"\nvoice = "ola"\nlang = "pl"\nrate = 1.5\n'
-        'history = 7\nfoo = 1\n\n[service]\nidle_timeout = "5m"\nautostart = false\n'
+        'config_version = 1\nengine = "fake"\nvoice = "ola"\nlang = "pl"\n'
+        'base_lang = "en"\nrate = 1.5\nhistory = 7\nfoo = 1\n\n'
+        '[service]\nidle_timeout = "5m"\nautostart = false\n'
     )
     assert store(tmp_path).read_file() == {
         "engine": "fake",
         "voice": "ola",
         "lang": "pl",
+        "base_lang": "en",
         "rate": 1.5,
         "history": 7,
         "idle_timeout": "5m",
@@ -49,6 +51,7 @@ def test_env_parsing(tmp_path: Path) -> None:
         "VOXLEKTOR_ENGINE": "fake",
         "VOXLEKTOR_VOICE": "ola",
         "VOXLEKTOR_LANG": "en",
+        "VOXLEKTOR_BASE_LANG": "pl",
         "VOXLEKTOR_RATE": "1.25",
         "VOXLEKTOR_IDLE_TIMEOUT": "10m",
         "VOXLEKTOR_AUTOSTART": "false",
@@ -58,6 +61,7 @@ def test_env_parsing(tmp_path: Path) -> None:
         "engine": "fake",
         "voice": "ola",
         "lang": "en",
+        "base_lang": "pl",
         "rate": 1.25,
         "idle_timeout": "10m",
         "autostart": False,
@@ -81,6 +85,7 @@ def test_env_idle_timeout_seconds(tmp_path: Path) -> None:
     [
         ("VOXLEKTOR_AUTOSTART", "maybe"),
         ("VOXLEKTOR_RATE", "fast"),
+        ("VOXLEKTOR_BASE_LANG", "auto"),
         ("VOXLEKTOR_IDLE_TIMEOUT", "soon"),
     ],
 )
@@ -129,12 +134,26 @@ def test_write_value_creates_file_and_parent(tmp_path: Path) -> None:
     assert s.read_file() == {"lang": "pl"}
 
 
+def test_write_value_base_lang_round_trip(tmp_path: Path) -> None:
+    s = store(tmp_path)
+    s.write_value("base_lang", "en")
+    assert s.read_file() == {"base_lang": "en"}
+    assert merge_layers(s.read_file()).base_lang == "en"
+
+
+def test_env_invalid_base_lang_names_variable(tmp_path: Path) -> None:
+    with pytest.raises(InvalidSetting) as info:
+        store(tmp_path, VOXLEKTOR_BASE_LANG="de").read_env()
+    assert "VOXLEKTOR_BASE_LANG" in str(info.value)
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [
         ("rate", "9"),
         ("rate", "x"),
         ("lang", "de"),
+        ("base_lang", "de"),
         ("nope", "1"),
         ("autostart", "maybe"),
         ("idle_timeout", "soon"),
