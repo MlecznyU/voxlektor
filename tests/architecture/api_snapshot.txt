@@ -1,0 +1,48 @@
+voxlektor.adapters.platform.macos:MacOSPlatform(home: pathlib.Path | None = None) -> None
+voxlektor.adapters.platform.macos:MacOSPlatform.config_dir(self) -> pathlib.Path
+voxlektor.adapters.platform.macos:MacOSPlatform.log_path(self) -> pathlib.Path
+voxlektor.adapters.platform.macos:MacOSPlatform.pid_path(self) -> pathlib.Path
+voxlektor.adapters.platform.macos:MacOSPlatform.runtime_dir(self) -> pathlib.Path
+voxlektor.adapters.platform.macos:MacOSPlatform.socket_path(self) -> pathlib.Path
+voxlektor.adapters.platform.unsupported:UnsupportedPlatform()
+voxlektor.adapters.platform.unsupported:UnsupportedPlatform.config_dir(self) -> pathlib.Path
+voxlektor.adapters.platform.unsupported:UnsupportedPlatform.log_path(self) -> pathlib.Path
+voxlektor.adapters.platform.unsupported:UnsupportedPlatform.pid_path(self) -> pathlib.Path
+voxlektor.adapters.platform.unsupported:UnsupportedPlatform.runtime_dir(self) -> pathlib.Path
+voxlektor.adapters.platform.unsupported:UnsupportedPlatform.socket_path(self) -> pathlib.Path
+voxlektor.adapters.storage.settings_toml:CONFIG_VERSION = 1
+voxlektor.adapters.storage.settings_toml:TomlSettingsStore(path: pathlib.Path, environ: collections.abc.Mapping[str, str]) -> None
+voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_env(self) -> dict[str, object]
+voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_file(self) -> dict[str, object]
+voxlektor.adapters.storage.settings_toml:TomlSettingsStore.write_value(self, key: str, value: str) -> None
+voxlektor.app.ports:PlatformInfo(*args, **kwargs)
+voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
+voxlektor.app.ports:PlatformInfo.log_path(self) -> pathlib.Path
+voxlektor.app.ports:PlatformInfo.pid_path(self) -> pathlib.Path
+voxlektor.app.ports:PlatformInfo.runtime_dir(self) -> pathlib.Path
+voxlektor.app.ports:PlatformInfo.socket_path(self) -> pathlib.Path
+voxlektor.app.ports:SettingsStore(*args, **kwargs)
+voxlektor.app.ports:SettingsStore.read_env(self) -> dict[str, object]
+voxlektor.app.ports:SettingsStore.read_file(self) -> dict[str, object]
+voxlektor.app.ports:SettingsStore.write_value(self, key: str, value: str) -> None
+voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str) -> voxlektor.app.ports.PlatformInfo
+voxlektor.domain.errors:DomainError(code: str, message: str) -> None
+voxlektor.domain.errors:InvalidDuration(message: str) -> None
+voxlektor.domain.errors:InvalidSetting(message: str) -> None
+voxlektor.domain.errors:PlatformError(message: str = 'platform not supported yet') -> None
+voxlektor.domain.errors:UnknownVoice(name: str, available: tuple[str, ...]) -> None
+voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', rate: float = 1.0, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
+voxlektor.domain.settings:Settings.ahead: int
+voxlektor.domain.settings:Settings.autostart: bool
+voxlektor.domain.settings:Settings.engine: voxlektor.domain.types.EngineId
+voxlektor.domain.settings:Settings.history: int
+voxlektor.domain.settings:Settings.idle_timeout_s: int
+voxlektor.domain.settings:Settings.lang: Literal['auto', 'pl', 'en']
+voxlektor.domain.settings:Settings.rate: float
+voxlektor.domain.settings:Settings.voice: voxlektor.domain.types.VoiceName
+voxlektor.domain.settings:merge_layers(*layers: collections.abc.Mapping[str, str | int | float | bool]) -> voxlektor.domain.settings.Settings
+voxlektor.domain.settings:parse_duration(s: str) -> int
+voxlektor.domain.types:ChunkId(x, /)
+voxlektor.domain.types:EngineId(x, /)
+voxlektor.domain.types:Epoch(x, /)
+voxlektor.domain.types:VoiceName(x, /)

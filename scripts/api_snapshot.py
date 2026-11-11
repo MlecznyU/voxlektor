@@ -28,7 +28,16 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT = ROOT / "tests" / "architecture" / "api_snapshot.txt"
 
 # Extended by each task as frozen modules appear.
-FROZEN_MODULES: tuple[str, ...] = ()
+FROZEN_MODULES: tuple[str, ...] = (
+    "voxlektor.domain.types",
+    "voxlektor.domain.errors",
+    "voxlektor.domain.settings",
+    "voxlektor.app.ports",
+    "voxlektor.adapters.storage.settings_toml",
+    "voxlektor.adapters.platform.macos",
+    "voxlektor.adapters.platform.unsupported",
+    "voxlektor.bootstrap.platform_select",
+)
 # Typer applications as "module:attribute", extended by the CLI task.
 FROZEN_CLI: tuple[str, ...] = ()
 

@@ -1,0 +1,101 @@
+"""SettingsStore backed by a TOML file and ``VOXLEKTOR_*`` environment variables."""
+
+import os
+import tomllib
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+import tomli_w
+
+from voxlektor.domain.errors import InvalidSetting
+from voxlektor.domain.settings import merge_layers
+
+CONFIG_VERSION = 1
+_TOP_KEYS = ("engine", "voice", "lang", "rate", "history")
+_SERVICE_KEYS = ("idle_timeout", "autostart")
+_ENV_NAMES = {
+    "engine": "VOXLEKTOR_ENGINE",
+    "voice": "VOXLEKTOR_VOICE",
+    "lang": "VOXLEKTOR_LANG",
+    "rate": "VOXLEKTOR_RATE",
+    "idle_timeout": "VOXLEKTOR_IDLE_TIMEOUT",
+    "autostart": "VOXLEKTOR_AUTOSTART",
+}
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off"}
+
+
+def _coerce(key: str, raw: str, source: str) -> str | int | float | bool:
+    """Turn a string (env or CLI) into the typed value for ``key``."""
+    try:
+        match key:
+            case "rate":
+                return float(raw)
+            case "history":
+                return int(raw)
+            case "autostart":
+                lowered = raw.strip().lower()
+                if lowered in _TRUE:
+                    return True
+                if lowered in _FALSE:
+                    return False
+                raise ValueError(raw)
+            case "idle_timeout":
+                return int(raw) if raw.isascii() and raw.isdigit() else raw
+            case "engine" | "voice" | "lang":
+                return raw
+            case _:
+                raise InvalidSetting(f"unknown setting {key!r}")
+    except ValueError:
+        raise InvalidSetting(f"{source}: invalid value {raw!r} for {key}") from None
+
+
+class TomlSettingsStore:
+    def __init__(self, path: Path, environ: Mapping[str, str]) -> None:
+        self._path = path
+        self._environ = environ
+
+    def _load(self) -> dict[str, Any]:
+        try:
+            with self._path.open("rb") as handle:
+                return tomllib.load(handle)
+        except FileNotFoundError:
+            return {}
+        except tomllib.TOMLDecodeError as error:
+            raise InvalidSetting(f"{self._path}: {error}") from None
+
+    def read_file(self) -> dict[str, object]:
+        data = self._load()
+        result: dict[str, object] = {key: data[key] for key in _TOP_KEYS if key in data}
+        service = data.get("service", {})
+        if not isinstance(service, dict):
+            raise InvalidSetting(f"{self._path}: [service] must be a table")
+        for key in _SERVICE_KEYS:
+            if key in service:
+                result[key] = service[key]  # pyright: ignore[reportUnknownMemberType]
+        return result
+
+    def read_env(self) -> dict[str, object]:
+        return {
+            key: _coerce(key, self._environ[name], name)
+            for key, name in _ENV_NAMES.items()
+            if name in self._environ
+        }
+
+    def write_value(self, key: str, value: str) -> None:
+        typed = _coerce(key, value, "value")
+        merge_layers({key: typed})
+        data = self._load()
+        data["config_version"] = CONFIG_VERSION
+        if key in _SERVICE_KEYS:
+            service = data.setdefault("service", {})
+            if not isinstance(service, dict):
+                raise InvalidSetting(f"{self._path}: [service] must be a table")
+            service[key] = typed  # pyright: ignore[reportUnknownVariableType]
+        else:
+            data[key] = typed
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_name(self._path.name + ".tmp")
+        tmp.write_bytes(tomli_w.dumps(data).encode())
+        os.replace(tmp, self._path)
