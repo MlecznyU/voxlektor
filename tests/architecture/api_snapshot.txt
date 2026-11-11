@@ -47,6 +47,9 @@ voxlektor.adapters.storage.voices_fs:FsVoiceRepository.names(self) -> list[str]
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
+voxlektor.adapters.transport.mapping:error_reply(err: voxlektor.contracts.codec.ProtocolError) -> voxlektor.contracts.protocol.Reply
+voxlektor.adapters.transport.mapping:to_command(req: Request) -> Command
+voxlektor.adapters.transport.mapping:to_wire_reply(req_id: str, reply: voxlektor.app.effects.Reply) -> voxlektor.contracts.protocol.Reply
 voxlektor.app.commands:Back() -> None
 voxlektor.app.commands:Command = Command
 voxlektor.app.commands:Pause() -> None
@@ -142,6 +145,10 @@ voxlektor.app.voices:VoiceCatalog.resolve(self, name: str) -> voxlektor.contract
 voxlektor.bootstrap.environment:prepare() -> None
 voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str, macos_version: str) -> voxlektor.app.ports.PlatformInfo
 voxlektor.bootstrap.registry:load_engine(engine_id: str) -> voxlektor.contracts.engine.Engine
+voxlektor.contracts.codec:ProtocolError(code: voxlektor.contracts.protocol.ErrorCode, message: str, request_id: str | None = None) -> None
+voxlektor.contracts.codec:decode_reply(line: bytes) -> voxlektor.contracts.protocol.Reply
+voxlektor.contracts.codec:decode_request(line: bytes) -> Request
+voxlektor.contracts.codec:encode_line(msg: msgspec.Struct) -> bytes
 voxlektor.contracts.engine:AudioChunk(samples: 'npt.NDArray[np.float32]', sample_rate: 'int') -> None
 voxlektor.contracts.engine:AudioChunk.sample_rate: int
 voxlektor.contracts.engine:AudioChunk.samples: npt.NDArray[np.float32]
@@ -173,6 +180,74 @@ voxlektor.contracts.engine:VoiceRef(name: str, ref_wav: pathlib.Path, ref_text: 
 voxlektor.contracts.engine:VoiceRef.name: str
 voxlektor.contracts.engine:VoiceRef.ref_text: str
 voxlektor.contracts.engine:VoiceRef.ref_wav: Path
+voxlektor.contracts.protocol:BackRequest(v: int, id: str)
+voxlektor.contracts.protocol:BackRequest.id: ?
+voxlektor.contracts.protocol:BackRequest.v: ?
+voxlektor.contracts.protocol:ErrorCode(*values)
+voxlektor.contracts.protocol:ErrorCode.audio_failed = 'audio_failed'
+voxlektor.contracts.protocol:ErrorCode.bad_frame = 'bad_frame'
+voxlektor.contracts.protocol:ErrorCode.bad_version = 'bad_version'
+voxlektor.contracts.protocol:ErrorCode.engine_failed = 'engine_failed'
+voxlektor.contracts.protocol:ErrorCode.internal = 'internal'
+voxlektor.contracts.protocol:ErrorCode.invalid_argument = 'invalid_argument'
+voxlektor.contracts.protocol:ErrorCode.invalid_duration = 'invalid_duration'
+voxlektor.contracts.protocol:ErrorCode.invalid_setting = 'invalid_setting'
+voxlektor.contracts.protocol:ErrorCode.unknown_command = 'unknown_command'
+voxlektor.contracts.protocol:ErrorCode.unknown_engine = 'unknown_engine'
+voxlektor.contracts.protocol:ErrorCode.unknown_voice = 'unknown_voice'
+voxlektor.contracts.protocol:ErrorCode.unsupported = 'unsupported'
+voxlektor.contracts.protocol:Event(v: int, event: str, data: dict[str, typing.Any])
+voxlektor.contracts.protocol:Event.data: dict[str, typing.Any]
+voxlektor.contracts.protocol:Event.event: str
+voxlektor.contracts.protocol:Event.v: int
+voxlektor.contracts.protocol:IdleRequest(v: int, id: str, timeout: str)
+voxlektor.contracts.protocol:IdleRequest.id: ?
+voxlektor.contracts.protocol:IdleRequest.timeout: str
+voxlektor.contracts.protocol:IdleRequest.v: ?
+voxlektor.contracts.protocol:MAX_FRAME = 1048576
+voxlektor.contracts.protocol:PROTOCOL_VERSION = 1
+voxlektor.contracts.protocol:PauseRequest(v: int, id: str)
+voxlektor.contracts.protocol:PauseRequest.id: ?
+voxlektor.contracts.protocol:PauseRequest.v: ?
+voxlektor.contracts.protocol:Reply(v: int, id: str | None, ok: bool, data: dict[str, typing.Any] | None = None, error: voxlektor.contracts.protocol.ReplyError | None = None)
+voxlektor.contracts.protocol:Reply.data: dict[str, typing.Any] | None
+voxlektor.contracts.protocol:Reply.error: voxlektor.contracts.protocol.ReplyError | None
+voxlektor.contracts.protocol:Reply.id: str | None
+voxlektor.contracts.protocol:Reply.ok: bool
+voxlektor.contracts.protocol:Reply.v: int
+voxlektor.contracts.protocol:ReplyError(code: voxlektor.contracts.protocol.ErrorCode, message: str)
+voxlektor.contracts.protocol:ReplyError.code: voxlektor.contracts.protocol.ErrorCode
+voxlektor.contracts.protocol:ReplyError.message: str
+voxlektor.contracts.protocol:Request = Request
+voxlektor.contracts.protocol:ResumeRequest(v: int, id: str)
+voxlektor.contracts.protocol:ResumeRequest.id: ?
+voxlektor.contracts.protocol:ResumeRequest.v: ?
+voxlektor.contracts.protocol:ShutdownRequest(v: int, id: str)
+voxlektor.contracts.protocol:ShutdownRequest.id: ?
+voxlektor.contracts.protocol:ShutdownRequest.v: ?
+voxlektor.contracts.protocol:SkipRequest(v: int, id: str)
+voxlektor.contracts.protocol:SkipRequest.id: ?
+voxlektor.contracts.protocol:SkipRequest.v: ?
+voxlektor.contracts.protocol:SpeakRequest(v: int, id: str, text: str, voice: str | None = None, lang: Optional[Literal['auto', 'pl', 'en']] = None, rate: float | None = None, now: bool = False)
+voxlektor.contracts.protocol:SpeakRequest.id: ?
+voxlektor.contracts.protocol:SpeakRequest.lang: Optional[Literal['auto', 'pl', 'en']]
+voxlektor.contracts.protocol:SpeakRequest.now: bool
+voxlektor.contracts.protocol:SpeakRequest.rate: float | None
+voxlektor.contracts.protocol:SpeakRequest.text: str
+voxlektor.contracts.protocol:SpeakRequest.v: ?
+voxlektor.contracts.protocol:SpeakRequest.voice: str | None
+voxlektor.contracts.protocol:StatusRequest(v: int, id: str)
+voxlektor.contracts.protocol:StatusRequest.id: ?
+voxlektor.contracts.protocol:StatusRequest.v: ?
+voxlektor.contracts.protocol:StopReadingRequest(v: int, id: str)
+voxlektor.contracts.protocol:StopReadingRequest.id: ?
+voxlektor.contracts.protocol:StopReadingRequest.v: ?
+voxlektor.contracts.protocol:SubscribeRequest(v: int, id: str)
+voxlektor.contracts.protocol:SubscribeRequest.id: ?
+voxlektor.contracts.protocol:SubscribeRequest.v: ?
+voxlektor.contracts.protocol:UnloadRequest(v: int, id: str)
+voxlektor.contracts.protocol:UnloadRequest.id: ?
+voxlektor.contracts.protocol:UnloadRequest.v: ?
 voxlektor.contracts.voicefmt:CACHE_DIR = 'cache'
 voxlektor.contracts.voicefmt:MAX_REF_SECONDS = 30
 voxlektor.contracts.voicefmt:META = 'voice.toml'

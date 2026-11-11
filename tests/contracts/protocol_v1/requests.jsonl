@@ -1,0 +1,12 @@
+{"cmd":"speak","v":1,"id":"r1","text":"Hello world."}
+{"cmd":"speak","v":1,"id":"r2","text":"Good morning.","voice":"m1-calm","lang":"en","rate":1.25,"now":true}
+{"cmd":"pause","v":1,"id":"r3"}
+{"cmd":"resume","v":1,"id":"r4"}
+{"cmd":"skip","v":1,"id":"r5"}
+{"cmd":"back","v":1,"id":"r6"}
+{"cmd":"stop_reading","v":1,"id":"r7"}
+{"cmd":"status","v":1,"id":"r8"}
+{"cmd":"idle","v":1,"id":"r9","timeout":"10m"}
+{"cmd":"unload","v":1,"id":"r10"}
+{"cmd":"shutdown","v":1,"id":"r11"}
+{"cmd":"subscribe","v":1,"id":"r12"}

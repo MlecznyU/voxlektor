@@ -1,0 +1,460 @@
+{
+  "$defs": {
+    "BackRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "back"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "BackRequest",
+      "type": "object"
+    },
+    "ErrorCode": {
+      "description": "Closed set of error codes; a new code needs a new protocol version.",
+      "enum": [
+        "audio_failed",
+        "bad_frame",
+        "bad_version",
+        "engine_failed",
+        "internal",
+        "invalid_argument",
+        "invalid_duration",
+        "invalid_setting",
+        "unknown_command",
+        "unknown_engine",
+        "unknown_voice",
+        "unsupported"
+      ],
+      "title": "ErrorCode"
+    },
+    "Event": {
+      "description": "Envelope for server-pushed events; defined for v1, unused in the MVP.",
+      "properties": {
+        "data": {
+          "type": "object"
+        },
+        "event": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "event",
+        "data"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "IdleRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "idle"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id",
+        "timeout"
+      ],
+      "title": "IdleRequest",
+      "type": "object"
+    },
+    "PauseRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "pause"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "PauseRequest",
+      "type": "object"
+    },
+    "Reply": {
+      "description": "``id`` is null only when the request had no readable id.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "ok"
+      ],
+      "title": "Reply",
+      "type": "object"
+    },
+    "ReplyError": {
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ReplyError",
+      "type": "object"
+    },
+    "ResumeRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "resume"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "ResumeRequest",
+      "type": "object"
+    },
+    "ShutdownRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "shutdown"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "ShutdownRequest",
+      "type": "object"
+    },
+    "SkipRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "skip"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "SkipRequest",
+      "type": "object"
+    },
+    "SpeakRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "speak"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "en",
+                "pl"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "now": {
+          "default": false,
+          "type": "boolean"
+        },
+        "rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "text": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        },
+        "voice": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id",
+        "text"
+      ],
+      "title": "SpeakRequest",
+      "type": "object"
+    },
+    "StatusRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "status"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "StatusRequest",
+      "type": "object"
+    },
+    "StopReadingRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "stop_reading"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "StopReadingRequest",
+      "type": "object"
+    },
+    "SubscribeRequest": {
+      "description": "Reserved for events; the MVP daemon answers ``unsupported``.",
+      "properties": {
+        "cmd": {
+          "enum": [
+            "subscribe"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "SubscribeRequest",
+      "type": "object"
+    },
+    "UnloadRequest": {
+      "properties": {
+        "cmd": {
+          "enum": [
+            "unload"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "UnloadRequest",
+      "type": "object"
+    }
+  },
+  "event": {
+    "$ref": "#/$defs/Event"
+  },
+  "reply": {
+    "$ref": "#/$defs/Reply"
+  },
+  "request": {
+    "anyOf": [
+      {
+        "$ref": "#/$defs/SpeakRequest"
+      },
+      {
+        "$ref": "#/$defs/PauseRequest"
+      },
+      {
+        "$ref": "#/$defs/ResumeRequest"
+      },
+      {
+        "$ref": "#/$defs/SkipRequest"
+      },
+      {
+        "$ref": "#/$defs/BackRequest"
+      },
+      {
+        "$ref": "#/$defs/StopReadingRequest"
+      },
+      {
+        "$ref": "#/$defs/StatusRequest"
+      },
+      {
+        "$ref": "#/$defs/IdleRequest"
+      },
+      {
+        "$ref": "#/$defs/UnloadRequest"
+      },
+      {
+        "$ref": "#/$defs/ShutdownRequest"
+      },
+      {
+        "$ref": "#/$defs/SubscribeRequest"
+      }
+    ],
+    "discriminator": {
+      "mapping": {
+        "back": "#/$defs/BackRequest",
+        "idle": "#/$defs/IdleRequest",
+        "pause": "#/$defs/PauseRequest",
+        "resume": "#/$defs/ResumeRequest",
+        "shutdown": "#/$defs/ShutdownRequest",
+        "skip": "#/$defs/SkipRequest",
+        "speak": "#/$defs/SpeakRequest",
+        "status": "#/$defs/StatusRequest",
+        "stop_reading": "#/$defs/StopReadingRequest",
+        "subscribe": "#/$defs/SubscribeRequest",
+        "unload": "#/$defs/UnloadRequest"
+      },
+      "propertyName": "cmd"
+    }
+  }
+}

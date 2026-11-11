@@ -1,0 +1,23 @@
+{"v":1,"id":"r1","ok":true,"data":{"chunks":1}}
+{"v":1,"id":"r2","ok":true,"data":{"chunks":1}}
+{"v":1,"id":"r3","ok":true,"data":{}}
+{"v":1,"id":"r4","ok":true,"data":{}}
+{"v":1,"id":"r5","ok":true,"data":{}}
+{"v":1,"id":"r6","ok":true,"data":{}}
+{"v":1,"id":"r7","ok":true,"data":{}}
+{"v":1,"id":"r9","ok":true,"data":{"idle_timeout_s":600}}
+{"v":1,"id":"r10","ok":true,"data":{}}
+{"v":1,"id":"r11","ok":true,"data":{}}
+{"v":1,"id":"r8","ok":true,"data":{"state":"WARM","engine":"omnivoice","voice":"v0-default","idle_timeout_s":600,"idle_remaining_s":590.5,"queued":0,"playing":false,"paused":false,"underruns":0,"first_audio_s":0.42,"chunks":3,"gen_seconds":1.5,"audio_seconds":9.0,"last_error":null,"caps":["back","idle","pause","resume","shutdown","skip","speak","status","stop_reading","unload"]}}
+{"v":1,"id":null,"ok":false,"error":{"code":"bad_frame","message":"frame is not a valid JSON object"}}
+{"v":1,"id":null,"ok":false,"error":{"code":"bad_version","message":"unsupported protocol version 2"}}
+{"v":1,"id":"x1","ok":false,"error":{"code":"unknown_command","message":"unknown command 'rm'"}}
+{"v":1,"id":"x2","ok":false,"error":{"code":"invalid_argument","message":"Expected `float | null`, got `str` - at `$.rate`"}}
+{"v":1,"id":"x3","ok":false,"error":{"code":"unknown_voice","message":"unknown voice 'zed'; available: m1-calm, v0-default"}}
+{"v":1,"id":"x4","ok":false,"error":{"code":"unknown_engine","message":"unknown engine 'nope'; available: fake, omnivoice"}}
+{"v":1,"id":"x5","ok":false,"error":{"code":"invalid_duration","message":"invalid duration '5x'; use 0, 90s, 10m or 1h"}}
+{"v":1,"id":"x6","ok":false,"error":{"code":"invalid_setting","message":"rate must be between 0.5 and 3.0"}}
+{"v":1,"id":"x7","ok":false,"error":{"code":"engine_failed","message":"engine failed to load"}}
+{"v":1,"id":"x8","ok":false,"error":{"code":"audio_failed","message":"audio device unavailable"}}
+{"v":1,"id":"r12","ok":false,"error":{"code":"unsupported","message":"subscribe is not supported yet"}}
+{"v":1,"id":"x9","ok":false,"error":{"code":"internal","message":"internal error"}}
