@@ -24,3 +24,9 @@ LANG_TABLE: tuple[tuple[str, Lang, Lang], ...] = (
     ("", "pl", "pl"),
     ("", "en", "en"),
 )
+
+# 110 characters; the latency probe of the real-model test (tests/adapters/engines).
+PL_PARAGRAPH_110 = (
+    "Sprawdziłem testy i wszystko przechodzi. Jedyny problem to ostrzeżenie przy buildzie, "
+    "ale nie blokuje niczego."
+)

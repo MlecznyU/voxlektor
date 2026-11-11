@@ -23,6 +23,10 @@ dependencies = [
 voxlektor = "voxlektor.entrypoints.cli.app:main"
 vxl = "voxlektor.entrypoints.cli.app:main"
 
+[project.entry-points."voxlektor.engines"]
+omnivoice = "voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine"
+fake = "voxlektor.testing.fakes:FakeEngine"
+
 [dependency-groups]
 dev = [
     "pytest",
@@ -85,6 +89,8 @@ banned-module-level-imports = ["numpy", "mlx", "mlx_audio", "sounddevice", "soun
 "src/voxlektor/testing/**" = ["TID251", "TID253"]
 "tests/**" = ["TID251", "TID253", "S101", "PLR2004"]
 "scripts/**" = ["TID251", "TID253", "S101", "ANN401"]
+# Hand-written stubs mirror the library: it takes **kwargs, returns an untyped model, imports mlx.
+"typings/**" = ["TID253", "ANN401"]
 
 # ---------------------------------------------------------------- coverage
 [tool.coverage.run]

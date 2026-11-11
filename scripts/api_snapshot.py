@@ -43,6 +43,12 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.adapters.platform.macos",
     "voxlektor.adapters.platform.unsupported",
     "voxlektor.bootstrap.platform_select",
+    "voxlektor.app.voice_prompts",
+    "voxlektor.adapters.engines.omnivoice_mlx",
+    "voxlektor.bootstrap.environment",
+    "voxlektor.bootstrap.registry",
+    "voxlektor.testing.fakes",
+    "voxlektor.testing.engine_contract",
 )
 # Typer applications as "module:attribute", extended by the CLI task.
 FROZEN_CLI: tuple[str, ...] = ()

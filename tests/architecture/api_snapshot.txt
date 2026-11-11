@@ -1,3 +1,15 @@
+voxlektor.adapters.engines.omnivoice_mlx:LANGS = {'pl': 'polish', 'en': 'english'}
+voxlektor.adapters.engines.omnivoice_mlx:NUM_STEPS = 16
+voxlektor.adapters.engines.omnivoice_mlx:OMNIVOICE_REVISION = '8fb0b754cad788aaefec690cd55c207e8a628f85'
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine() -> None
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.deserialize_prompt(self, voice: str, data: bytes) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.load(self) -> None
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.prepare_voice(self, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.serialize_prompt(self, p: voxlektor.contracts.engine.VoicePrompt) -> bytes
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.synthesize(self, text: str, lang: str, prompt: voxlektor.contracts.engine.VoicePrompt) -> collections.abc.Iterator[voxlektor.contracts.engine.AudioChunk]
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.unload(self) -> None
+voxlektor.adapters.engines.omnivoice_mlx:PROMPT_FORMAT = 1
+voxlektor.adapters.engines.omnivoice_mlx:REPO = 'mlx-community/OmniVoice-bf16'
 voxlektor.adapters.platform.macos:MacOSPlatform(home: pathlib.Path | None = None) -> None
 voxlektor.adapters.platform.macos:MacOSPlatform.config_dir(self) -> pathlib.Path
 voxlektor.adapters.platform.macos:MacOSPlatform.log_path(self) -> pathlib.Path
@@ -20,6 +32,7 @@ voxlektor.adapters.storage.voices_fs:FsVoiceRepository.names(self) -> list[str]
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
+voxlektor.app.ports:EngineProvider(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.log_path(self) -> pathlib.Path
@@ -36,15 +49,45 @@ voxlektor.app.ports:VoiceRepository.names(self) -> list[str]
 voxlektor.app.ports:VoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
 voxlektor.app.ports:VoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
 voxlektor.app.ports:VoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
+voxlektor.app.voice_prompts:get_or_build_prompt(engine: voxlektor.contracts.engine.Engine, repo: voxlektor.app.ports.VoiceRepository, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
 voxlektor.app.voices:VoiceCatalog(repo: voxlektor.app.ports.VoiceRepository) -> None
 voxlektor.app.voices:VoiceCatalog.ensure_bundled(self) -> None
 voxlektor.app.voices:VoiceCatalog.list(self) -> list[str]
 voxlektor.app.voices:VoiceCatalog.resolve(self, name: str) -> voxlektor.contracts.engine.VoiceRef
+voxlektor.bootstrap.environment:prepare() -> None
 voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str, macos_version: str) -> voxlektor.app.ports.PlatformInfo
+voxlektor.bootstrap.registry:load_engine(engine_id: str) -> voxlektor.contracts.engine.Engine
+voxlektor.contracts.engine:AudioChunk(samples: 'npt.NDArray[np.float32]', sample_rate: 'int') -> None
+voxlektor.contracts.engine:AudioChunk.sample_rate: int
+voxlektor.contracts.engine:AudioChunk.samples: npt.NDArray[np.float32]
+voxlektor.contracts.engine:Capability(*values)
+voxlektor.contracts.engine:Capability.CLONE = 'clone'
+voxlektor.contracts.engine:Capability.DESIGN = 'design'
+voxlektor.contracts.engine:Capability.LIVE = 'live'
+voxlektor.contracts.engine:Capability.RENDER = 'render'
+voxlektor.contracts.engine:ENGINE_API = 1
+voxlektor.contracts.engine:Engine(*args, **kwargs)
+voxlektor.contracts.engine:Engine.deserialize_prompt(self, voice: str, data: bytes) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.contracts.engine:Engine.load(self) -> None
+voxlektor.contracts.engine:Engine.prepare_voice(self, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.contracts.engine:Engine.serialize_prompt(self, p: voxlektor.contracts.engine.VoicePrompt) -> bytes
+voxlektor.contracts.engine:Engine.synthesize(self, text: str, lang: str, prompt: voxlektor.contracts.engine.VoicePrompt) -> collections.abc.Iterator[voxlektor.contracts.engine.AudioChunk]
+voxlektor.contracts.engine:Engine.unload(self) -> None
+voxlektor.contracts.engine:EngineSpec(id: str, revision: str, prompt_format: int, sample_rate: int, langs: frozenset[str], capabilities: frozenset[voxlektor.contracts.engine.Capability]) -> None
+voxlektor.contracts.engine:EngineSpec.capabilities: frozenset[Capability]
+voxlektor.contracts.engine:EngineSpec.id: str
+voxlektor.contracts.engine:EngineSpec.langs: frozenset[str]
+voxlektor.contracts.engine:EngineSpec.prompt_format: int
+voxlektor.contracts.engine:EngineSpec.revision: str
+voxlektor.contracts.engine:EngineSpec.sample_rate: int
+voxlektor.contracts.engine:VoicePrompt(voice: str, prompt_format: int, data: object) -> None
+voxlektor.contracts.engine:VoicePrompt.data: object
+voxlektor.contracts.engine:VoicePrompt.prompt_format: int
+voxlektor.contracts.engine:VoicePrompt.voice: str
 voxlektor.contracts.engine:VoiceRef(name: str, ref_wav: pathlib.Path, ref_text: str) -> None
 voxlektor.contracts.engine:VoiceRef.name: str
 voxlektor.contracts.engine:VoiceRef.ref_text: str
-voxlektor.contracts.engine:VoiceRef.ref_wav: pathlib.Path
+voxlektor.contracts.engine:VoiceRef.ref_wav: Path
 voxlektor.contracts.voicefmt:CACHE_DIR = 'cache'
 voxlektor.contracts.voicefmt:MAX_REF_SECONDS = 30
 voxlektor.contracts.voicefmt:META = 'voice.toml'
@@ -81,3 +124,17 @@ voxlektor.domain.types:ChunkId(x, /)
 voxlektor.domain.types:EngineId(x, /)
 voxlektor.domain.types:Epoch(x, /)
 voxlektor.domain.types:VoiceName(x, /)
+voxlektor.testing.engine_contract:run_engine_contract(engine: voxlektor.contracts.engine.Engine, ref: voxlektor.contracts.engine.VoiceRef) -> None
+voxlektor.testing.fakes:FakeEngine(sample_rate: int = 24000, seconds_per_char: float = 0.05, delay_s: float = 0.0, fail_on: str | None = None) -> None
+voxlektor.testing.fakes:FakeEngine.deserialize_prompt(self, voice: str, data: bytes) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.testing.fakes:FakeEngine.load(self) -> None
+voxlektor.testing.fakes:FakeEngine.prepare_voice(self, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
+voxlektor.testing.fakes:FakeEngine.serialize_prompt(self, p: voxlektor.contracts.engine.VoicePrompt) -> bytes
+voxlektor.testing.fakes:FakeEngine.synthesize(self, text: str, lang: str, prompt: voxlektor.contracts.engine.VoicePrompt) -> collections.abc.Iterator[voxlektor.contracts.engine.AudioChunk]
+voxlektor.testing.fakes:FakeEngine.unload(self) -> None
+voxlektor.testing.fakes:InMemoryVoiceRepository(refs: collections.abc.Iterable[voxlektor.contracts.engine.VoiceRef] = ()) -> None
+voxlektor.testing.fakes:InMemoryVoiceRepository.install_bundled(self) -> None
+voxlektor.testing.fakes:InMemoryVoiceRepository.names(self) -> list[str]
+voxlektor.testing.fakes:InMemoryVoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
+voxlektor.testing.fakes:InMemoryVoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
+voxlektor.testing.fakes:InMemoryVoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None

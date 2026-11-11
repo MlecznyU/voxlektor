@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Protocol
 
-from voxlektor.contracts.engine import VoiceRef
+from voxlektor.contracts.engine import Engine, VoiceRef
 
 
 class SettingsStore(Protocol):
@@ -38,3 +38,7 @@ class VoiceRepository(Protocol):
     def install_bundled(self) -> None:
         """Copy bundled voices that are missing; never overwrite anything."""
         ...
+
+
+class EngineProvider(Protocol):
+    def __call__(self, engine_id: str) -> Engine: ...
