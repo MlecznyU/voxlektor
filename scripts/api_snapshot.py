@@ -55,6 +55,10 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.adapters.audio.memory_out",
     "voxlektor.testing.fakes",
     "voxlektor.testing.engine_contract",
+    "voxlektor.app.commands",
+    "voxlektor.app.effects",
+    "voxlektor.app.session",
+    "voxlektor.testing.simulator",
 )
 # Typer applications as "module:attribute", extended by the CLI task.
 FROZEN_CLI: tuple[str, ...] = ()

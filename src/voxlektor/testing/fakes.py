@@ -20,17 +20,24 @@ class FakeEngine:
 
     ``synth_calls`` records a call when ``synthesize`` is called; ``fail_on`` (a substring of
     the text) and ``delay_s`` act lazily, when the returned iterator is first advanced.
+
+    Transient failures: with ``fail_times=None`` every synthesis matching ``fail_on`` fails;
+    with ``fail_times=N`` only the first N matching syntheses fail and later ones succeed.
+    ``fail_prepare=N`` makes the first N ``prepare_voice`` calls raise (then they succeed).
     """
 
     PROMPT_FORMAT = 1
     _PROMPT_MAGIC = b"fake-prompt-v1:"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # the failure knobs are keyword-only additions
         self,
         sample_rate: int = 24000,
         seconds_per_char: float = 0.05,
         delay_s: float = 0.0,
         fail_on: str | None = None,
+        *,
+        fail_times: int | None = None,
+        fail_prepare: int = 0,
     ) -> None:
         self.spec = EngineSpec(
             id="fake",
@@ -43,6 +50,8 @@ class FakeEngine:
         self._seconds_per_char = seconds_per_char
         self._delay_s = delay_s
         self._fail_on = fail_on
+        self._synth_failures_left = fail_times
+        self._prepare_failures_left = fail_prepare
         self._loaded = False
         self.load_calls = 0
         self.unload_calls = 0
@@ -59,6 +68,9 @@ class FakeEngine:
 
     def prepare_voice(self, ref: VoiceRef) -> VoicePrompt:
         self._require_loaded()
+        if self._prepare_failures_left > 0:
+            self._prepare_failures_left -= 1
+            raise RuntimeError("fake prepare failure")
         self.prepare_calls += 1
         return VoicePrompt(ref.name, self.PROMPT_FORMAT, ref.ref_text)
 
@@ -83,13 +95,21 @@ class FakeEngine:
         self.synth_calls.append((text, lang))
         return self._chunks(text)
 
+    def _use_up_failure(self) -> bool:
+        if self._synth_failures_left is None:
+            return True
+        if self._synth_failures_left == 0:
+            return False
+        self._synth_failures_left -= 1
+        return True
+
     def _require_loaded(self) -> None:
         if not self._loaded:
             raise RuntimeError("engine not loaded")
 
     def _chunks(self, text: str) -> Iterator[AudioChunk]:
         time.sleep(self._delay_s)
-        if self._fail_on is not None and self._fail_on in text:
+        if self._fail_on is not None and self._fail_on in text and self._use_up_failure():
             raise RuntimeError(f"fake engine failure on {self._fail_on!r}")
         rate = self.spec.sample_rate
         total = max(1, round(len(text) * self._seconds_per_char * rate))

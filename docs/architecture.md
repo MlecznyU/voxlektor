@@ -47,8 +47,8 @@ src/voxlektor/
   app/                        SYNC, no threads and no asyncio; ports only
     ports.py                  Clock, AudioOutput, VoiceRepository, SettingsStore, PlatformInfo, EngineProvider
     commands.py               application commands (independent of the protocol version)
-    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, ScheduleWake, Emit, Exit
-    session.py                Session.handle(cmd, now) -> Outcome(reply, effects); on_loaded/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake
+    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit; Reply, Outcome
+    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded
     voice_prompts.py          get_or_build_prompt(): cache via VoiceRepository + Engine.serialize_prompt
     voices.py                 VoiceCatalog: list/resolve/ensure_bundled
 
