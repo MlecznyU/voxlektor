@@ -47,6 +47,10 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.adapters.engines.omnivoice_mlx",
     "voxlektor.bootstrap.environment",
     "voxlektor.bootstrap.registry",
+    "voxlektor.domain.playback",
+    "voxlektor.adapters.audio.dsp",
+    "voxlektor.adapters.audio.sounddevice_out",
+    "voxlektor.adapters.audio.memory_out",
     "voxlektor.testing.fakes",
     "voxlektor.testing.engine_contract",
 )

@@ -1,3 +1,18 @@
+voxlektor.adapters.audio.dsp:time_stretch(samples: NDArray[numpy.float32], rate: float) -> NDArray[numpy.float32]
+voxlektor.adapters.audio.memory_out:MemoryOutput(auto_complete: bool = True) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.abort(self) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.complete(self, chunk: voxlektor.domain.types.ChunkId) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.fail(self, chunk: voxlektor.domain.types.ChunkId, msg: str) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.pause(self) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.resume(self) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.set_callbacks(self, on_done: collections.abc.Callable[[voxlektor.domain.types.ChunkId], None], on_failed: collections.abc.Callable[[voxlektor.domain.types.ChunkId, str], None]) -> None
+voxlektor.adapters.audio.memory_out:MemoryOutput.start(self, chunk: voxlektor.domain.types.ChunkId, samples: object, sample_rate: int) -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput() -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.abort(self) -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.pause(self) -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.resume(self) -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.set_callbacks(self, on_done: collections.abc.Callable[[voxlektor.domain.types.ChunkId], None], on_failed: collections.abc.Callable[[voxlektor.domain.types.ChunkId, str], None]) -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.start(self, chunk: voxlektor.domain.types.ChunkId, samples: object, sample_rate: int) -> None
 voxlektor.adapters.engines.omnivoice_mlx:LANGS = {'pl': 'polish', 'en': 'english'}
 voxlektor.adapters.engines.omnivoice_mlx:NUM_STEPS = 16
 voxlektor.adapters.engines.omnivoice_mlx:OMNIVOICE_REVISION = '8fb0b754cad788aaefec690cd55c207e8a628f85'
@@ -32,6 +47,14 @@ voxlektor.adapters.storage.voices_fs:FsVoiceRepository.names(self) -> list[str]
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
+voxlektor.app.ports:AudioOutput(*args, **kwargs)
+voxlektor.app.ports:AudioOutput.abort(self) -> None
+voxlektor.app.ports:AudioOutput.pause(self) -> None
+voxlektor.app.ports:AudioOutput.resume(self) -> None
+voxlektor.app.ports:AudioOutput.set_callbacks(self, on_done: collections.abc.Callable[[voxlektor.domain.types.ChunkId], None], on_failed: collections.abc.Callable[[voxlektor.domain.types.ChunkId, str], None]) -> None
+voxlektor.app.ports:AudioOutput.start(self, chunk: voxlektor.domain.types.ChunkId, samples: object, sample_rate: int) -> None
+voxlektor.app.ports:Clock(*args, **kwargs)
+voxlektor.app.ports:Clock.now(self) -> float
 voxlektor.app.ports:EngineProvider(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
@@ -106,6 +129,15 @@ voxlektor.domain.errors:InvalidDuration(message: str) -> None
 voxlektor.domain.errors:InvalidSetting(message: str) -> None
 voxlektor.domain.errors:PlatformError(message: str = 'platform not supported yet') -> None
 voxlektor.domain.errors:UnknownVoice(name: str, available: tuple[str, ...]) -> None
+voxlektor.domain.playback:PlaybackQueue(history: int = 20) -> None
+voxlektor.domain.playback:PlaybackQueue.back(self) -> list[A]
+voxlektor.domain.playback:PlaybackQueue.clear(self) -> list[A]
+voxlektor.domain.playback:PlaybackQueue.finish_current(self) -> None
+voxlektor.domain.playback:PlaybackQueue.pause(self) -> None
+voxlektor.domain.playback:PlaybackQueue.push(self, item: A) -> None
+voxlektor.domain.playback:PlaybackQueue.resume(self) -> None
+voxlektor.domain.playback:PlaybackQueue.skip(self) -> Optional[A]
+voxlektor.domain.playback:PlaybackQueue.start_next(self) -> Optional[A]
 voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', base_lang: Literal['pl', 'en'] = 'pl', rate: float = 1.0, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
 voxlektor.domain.settings:Settings.ahead: int
 voxlektor.domain.settings:Settings.autostart: bool
@@ -125,6 +157,9 @@ voxlektor.domain.types:EngineId(x, /)
 voxlektor.domain.types:Epoch(x, /)
 voxlektor.domain.types:VoiceName(x, /)
 voxlektor.testing.engine_contract:run_engine_contract(engine: voxlektor.contracts.engine.Engine, ref: voxlektor.contracts.engine.VoiceRef) -> None
+voxlektor.testing.fakes:FakeClock(t: float = 0.0) -> None
+voxlektor.testing.fakes:FakeClock.advance(self, s: float) -> None
+voxlektor.testing.fakes:FakeClock.now(self) -> float
 voxlektor.testing.fakes:FakeEngine(sample_rate: int = 24000, seconds_per_char: float = 0.05, delay_s: float = 0.0, fail_on: str | None = None) -> None
 voxlektor.testing.fakes:FakeEngine.deserialize_prompt(self, voice: str, data: bytes) -> voxlektor.contracts.engine.VoicePrompt
 voxlektor.testing.fakes:FakeEngine.load(self) -> None
@@ -138,3 +173,11 @@ voxlektor.testing.fakes:InMemoryVoiceRepository.names(self) -> list[str]
 voxlektor.testing.fakes:InMemoryVoiceRepository.read_cache(self, name: str, key: str) -> bytes | None
 voxlektor.testing.fakes:InMemoryVoiceRepository.ref(self, name: str) -> voxlektor.contracts.engine.VoiceRef
 voxlektor.testing.fakes:InMemoryVoiceRepository.write_cache(self, name: str, key: str, data: bytes) -> None
+voxlektor.testing.fakes:MemoryOutput(auto_complete: bool = True) -> None
+voxlektor.testing.fakes:MemoryOutput.abort(self) -> None
+voxlektor.testing.fakes:MemoryOutput.complete(self, chunk: voxlektor.domain.types.ChunkId) -> None
+voxlektor.testing.fakes:MemoryOutput.fail(self, chunk: voxlektor.domain.types.ChunkId, msg: str) -> None
+voxlektor.testing.fakes:MemoryOutput.pause(self) -> None
+voxlektor.testing.fakes:MemoryOutput.resume(self) -> None
+voxlektor.testing.fakes:MemoryOutput.set_callbacks(self, on_done: collections.abc.Callable[[voxlektor.domain.types.ChunkId], None], on_failed: collections.abc.Callable[[voxlektor.domain.types.ChunkId, str], None]) -> None
+voxlektor.testing.fakes:MemoryOutput.start(self, chunk: voxlektor.domain.types.ChunkId, samples: object, sample_rate: int) -> None

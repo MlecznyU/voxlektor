@@ -5,8 +5,11 @@ from collections.abc import Iterable, Iterator
 
 import numpy as np
 
+from voxlektor.adapters.audio.memory_out import MemoryOutput
 from voxlektor.contracts.engine import AudioChunk, Capability, EngineSpec, VoicePrompt, VoiceRef
 from voxlektor.domain.errors import UnknownVoice
+
+__all__ = ["FakeClock", "FakeEngine", "InMemoryVoiceRepository", "MemoryOutput"]
 
 _TONE_HZ = 220.0
 _AMPLITUDE = 0.1
@@ -94,6 +97,19 @@ class FakeEngine:
             index = np.arange(start, min(start + rate, total), dtype=np.float64)
             tone = _AMPLITUDE * np.sin(2.0 * np.pi * _TONE_HZ * index / rate)
             yield AudioChunk(tone.astype(np.float32), rate)
+
+
+class FakeClock:
+    """A clock that only moves when told to."""
+
+    def __init__(self, t: float = 0.0) -> None:
+        self._t = t
+
+    def now(self) -> float:
+        return self._t
+
+    def advance(self, s: float) -> None:
+        self._t += s
 
 
 class InMemoryVoiceRepository:
