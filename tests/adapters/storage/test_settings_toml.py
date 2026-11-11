@@ -1,6 +1,5 @@
 import tomllib
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -79,7 +78,11 @@ def test_env_idle_timeout_seconds(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("name", "raw"),
-    [("VOXLEKTOR_AUTOSTART", "maybe"), ("VOXLEKTOR_RATE", "fast")],
+    [
+        ("VOXLEKTOR_AUTOSTART", "maybe"),
+        ("VOXLEKTOR_RATE", "fast"),
+        ("VOXLEKTOR_IDLE_TIMEOUT", "soon"),
+    ],
 )
 def test_env_invalid_values_raise(tmp_path: Path, name: str, raw: str) -> None:
     with pytest.raises(InvalidSetting):
@@ -89,10 +92,7 @@ def test_env_invalid_values_raise(tmp_path: Path, name: str, raw: str) -> None:
 def test_layers_end_to_end(tmp_path: Path) -> None:
     (tmp_path / "config.toml").write_text('voice = "file"\n[service]\nautostart = true\n')
     s = store(tmp_path, VOXLEKTOR_VOICE="env", VOXLEKTOR_AUTOSTART="false")
-    # SettingsStore yields dict[str, object] while merge_layers is typed on scalars (see report).
-    file_layer = cast("dict[str, str | int | float | bool]", s.read_file())
-    env_layer = cast("dict[str, str | int | float | bool]", s.read_env())
-    settings = merge_layers(file_layer, env_layer)
+    settings = merge_layers(s.read_file(), s.read_env())
     assert settings.voice == "env"
     assert settings.autostart is False
 
@@ -131,7 +131,14 @@ def test_write_value_creates_file_and_parent(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("key", "value"),
-    [("rate", "9"), ("rate", "x"), ("lang", "de"), ("nope", "1"), ("autostart", "maybe")],
+    [
+        ("rate", "9"),
+        ("rate", "x"),
+        ("lang", "de"),
+        ("nope", "1"),
+        ("autostart", "maybe"),
+        ("idle_timeout", "soon"),
+    ],
 )
 def test_write_value_rejects_invalid(tmp_path: Path, key: str, value: str) -> None:
     with pytest.raises(InvalidSetting):

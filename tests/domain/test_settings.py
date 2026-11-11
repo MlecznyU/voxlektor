@@ -10,6 +10,7 @@ from voxlektor.domain.errors import (
     UnknownVoice,
 )
 from voxlektor.domain.settings import Settings, merge_layers, parse_duration
+from voxlektor.domain.types import EngineId, VoiceName
 
 
 def test_defaults() -> None:
@@ -45,8 +46,8 @@ def test_all_keys_are_applied() -> None:
         }
     )
     assert settings == Settings(
-        engine="fake",  # type: ignore[arg-type]
-        voice="ola",  # type: ignore[arg-type]
+        engine=EngineId("fake"),
+        voice=VoiceName("ola"),
         lang="pl",
         rate=2.0,
         history=5,
@@ -78,9 +79,19 @@ def test_idle_timeout_accepts_seconds_int() -> None:
         {"idle_timeout": True},
         {"autostart": "yes"},
         {"nonsense": 1},
+        {"engine": None},
+        {"voice": ["a"]},
+        {"lang": None},
+        {"rate": None},
+        {"rate": [1.0]},
+        {"history": None},
+        {"idle_timeout": None},
+        {"idle_timeout": ["10m"]},
+        {"autostart": None},
+        {"autostart": 1},
     ],
 )
-def test_invalid_settings_raise(layer: dict[str, str | int | float | bool]) -> None:
+def test_invalid_settings_raise(layer: dict[str, object]) -> None:
     with pytest.raises(InvalidSetting) as info:
         merge_layers(layer)
     assert info.value.code == "invalid_setting"

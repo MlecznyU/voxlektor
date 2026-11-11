@@ -8,10 +8,10 @@ from typing import Any
 
 import tomli_w
 
-from voxlektor.domain.errors import InvalidSetting
-from voxlektor.domain.settings import merge_layers
+from voxlektor.domain.errors import InvalidDuration, InvalidSetting
+from voxlektor.domain.settings import merge_layers, parse_duration
 
-CONFIG_VERSION = 1
+_CONFIG_VERSION = 1
 _TOP_KEYS = ("engine", "voice", "lang", "rate", "history")
 _SERVICE_KEYS = ("idle_timeout", "autostart")
 _ENV_NAMES = {
@@ -42,12 +42,15 @@ def _coerce(key: str, raw: str, source: str) -> str | int | float | bool:
                     return False
                 raise ValueError(raw)
             case "idle_timeout":
-                return int(raw) if raw.isascii() and raw.isdigit() else raw
+                digits = raw.isascii() and raw.isdigit()
+                if not digits:
+                    parse_duration(raw)
+                return int(raw) if digits else raw
             case "engine" | "voice" | "lang":
                 return raw
             case _:
                 raise InvalidSetting(f"unknown setting {key!r}")
-    except ValueError:
+    except (ValueError, InvalidDuration):
         raise InvalidSetting(f"{source}: invalid value {raw!r} for {key}") from None
 
 
@@ -87,7 +90,7 @@ class TomlSettingsStore:
         typed = _coerce(key, value, "value")
         merge_layers({key: typed})
         data = self._load()
-        data["config_version"] = CONFIG_VERSION
+        data["config_version"] = _CONFIG_VERSION
         if key in _SERVICE_KEYS:
             service = data.setdefault("service", {})
             if not isinstance(service, dict):

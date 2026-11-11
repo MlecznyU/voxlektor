@@ -81,7 +81,7 @@ def _autostart(value: object) -> bool:
     return value
 
 
-def merge_layers(*layers: Mapping[str, str | int | float | bool]) -> Settings:
+def merge_layers(*layers: Mapping[str, object]) -> Settings:
     """Merge layers (later wins) over the defaults and validate the result."""
     merged: dict[str, object] = {}
     for layer in layers:
