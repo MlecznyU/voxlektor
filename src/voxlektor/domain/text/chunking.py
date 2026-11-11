@@ -2,6 +2,8 @@
 
 import re
 
+from voxlektor.domain.text import limits
+
 _PARAGRAPH = re.compile(r"\n\s*\n")
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
 
@@ -50,7 +52,9 @@ def _paragraph_chunks(paragraph: str, max_chars: int) -> list[str]:
     return _pack(units, max_chars)
 
 
-def split_text(text: str, max_chars: int = 300, merge_below: int = 60) -> list[str]:
+def split_text(
+    text: str, max_chars: int = limits.MAX_CHARS, merge_below: int = limits.MERGE_BELOW
+) -> list[str]:
     """Split text into chunks of at most max_chars (except never inside a word).
 
     Paragraphs (blank lines) and sentences are boundaries; consecutive chunks

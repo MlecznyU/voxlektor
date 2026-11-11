@@ -129,6 +129,40 @@ voxlektor.domain.errors:InvalidDuration(message: str) -> None
 voxlektor.domain.errors:InvalidSetting(message: str) -> None
 voxlektor.domain.errors:PlatformError(message: str = 'platform not supported yet') -> None
 voxlektor.domain.errors:UnknownVoice(name: str, available: tuple[str, ...]) -> None
+voxlektor.domain.keepwarm:Action = Action
+voxlektor.domain.keepwarm:Busy() -> None
+voxlektor.domain.keepwarm:CancelWake() -> None
+voxlektor.domain.keepwarm:Event = Event
+voxlektor.domain.keepwarm:FlushPending() -> None
+voxlektor.domain.keepwarm:Idle(now: float) -> None
+voxlektor.domain.keepwarm:Idle.now: float
+voxlektor.domain.keepwarm:KeepWarm(life: voxlektor.domain.keepwarm.Life, timeout_s: int, deadline: float | None, unload_after_load: bool, reload_after_unload: bool = False, idle_since: float | None = None) -> None
+voxlektor.domain.keepwarm:KeepWarm.deadline: float | None
+voxlektor.domain.keepwarm:KeepWarm.idle_since: float | None
+voxlektor.domain.keepwarm:KeepWarm.life: voxlektor.domain.keepwarm.Life
+voxlektor.domain.keepwarm:KeepWarm.reload_after_unload: bool
+voxlektor.domain.keepwarm:KeepWarm.timeout_s: int
+voxlektor.domain.keepwarm:KeepWarm.unload_after_load: bool
+voxlektor.domain.keepwarm:Life(*values)
+voxlektor.domain.keepwarm:Life.COLD = 'cold'
+voxlektor.domain.keepwarm:Life.LOADING = 'loading'
+voxlektor.domain.keepwarm:Life.UNLOADING = 'unloading'
+voxlektor.domain.keepwarm:Life.WARM = 'warm'
+voxlektor.domain.keepwarm:LoadFailed(msg: str) -> None
+voxlektor.domain.keepwarm:LoadFailed.msg: str
+voxlektor.domain.keepwarm:Loaded() -> None
+voxlektor.domain.keepwarm:NeedEngine() -> None
+voxlektor.domain.keepwarm:ScheduleWake(at: float) -> None
+voxlektor.domain.keepwarm:ScheduleWake.at: float
+voxlektor.domain.keepwarm:SetTimeout(seconds: int) -> None
+voxlektor.domain.keepwarm:SetTimeout.seconds: int
+voxlektor.domain.keepwarm:StartLoad() -> None
+voxlektor.domain.keepwarm:StartUnload() -> None
+voxlektor.domain.keepwarm:UnloadRequested() -> None
+voxlektor.domain.keepwarm:Unloaded() -> None
+voxlektor.domain.keepwarm:Wake(now: float) -> None
+voxlektor.domain.keepwarm:Wake.now: float
+voxlektor.domain.keepwarm:transition(s: voxlektor.domain.keepwarm.KeepWarm, e: Event) -> tuple[voxlektor.domain.keepwarm.KeepWarm, list[Action]]
 voxlektor.domain.playback:PlaybackQueue(history: int = 20) -> None
 voxlektor.domain.playback:PlaybackQueue.back(self) -> list[A]
 voxlektor.domain.playback:PlaybackQueue.clear(self) -> list[A]
@@ -138,6 +172,17 @@ voxlektor.domain.playback:PlaybackQueue.push(self, item: A) -> None
 voxlektor.domain.playback:PlaybackQueue.resume(self) -> None
 voxlektor.domain.playback:PlaybackQueue.skip(self) -> Optional[A]
 voxlektor.domain.playback:PlaybackQueue.start_next(self) -> Optional[A]
+voxlektor.domain.reading:AheadWindow(ahead: int) -> None
+voxlektor.domain.reading:AheadWindow.next_to_generate(self, pending: collections.abc.Sequence[voxlektor.domain.reading.Chunk], generated_unplayed: int) -> voxlektor.domain.reading.Chunk | None
+voxlektor.domain.reading:Chunk(id: voxlektor.domain.types.ChunkId, text: str, lang: Literal['pl', 'en'], rate: float, epoch: voxlektor.domain.types.Epoch) -> None
+voxlektor.domain.reading:Chunk.epoch: voxlektor.domain.types.Epoch
+voxlektor.domain.reading:Chunk.id: voxlektor.domain.types.ChunkId
+voxlektor.domain.reading:Chunk.lang: Literal['pl', 'en']
+voxlektor.domain.reading:Chunk.rate: float
+voxlektor.domain.reading:Chunk.text: str
+voxlektor.domain.reading:UnderrunTracker() -> None
+voxlektor.domain.reading:UnderrunTracker.on_queue_empty(self, more_expected: bool) -> None
+voxlektor.domain.reading:plan_reading(text: str, lang: Literal['auto', 'pl', 'en'], base_lang: Literal['pl', 'en'], rate: float, epoch: voxlektor.domain.types.Epoch, first_id: int) -> list[voxlektor.domain.reading.Chunk]
 voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', base_lang: Literal['pl', 'en'] = 'pl', rate: float = 1.0, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
 voxlektor.domain.settings:Settings.ahead: int
 voxlektor.domain.settings:Settings.autostart: bool

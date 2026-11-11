@@ -37,11 +37,12 @@ src/voxlektor/
     types.py                  NewType VoiceName/EngineId/ChunkId/Epoch; Lang; LangPref; Rate; Seconds
     errors.py                 DomainError with a stable `code`
     settings.py               Settings, merge_layers(), parse_duration()
-    keepwarm.py               COLD/LOADING/WARM/UNLOADING; transition(state, event, now) -> (state, actions)
+    keepwarm.py               COLD/LOADING/WARM/UNLOADING; transition(state, event) -> (state, actions); time arrives in events
     playback.py               PlaybackQueue[A]: queued/current/history(20); skip/back/stop/pause
-    reading.py                Reading/Chunk; AheadWindow (max. 2 ahead); underrun detection
+    reading.py                Chunk; AheadWindow (max. 2 ahead); UnderrunTracker; plan_reading() (per-chunk language, same-language merge)
     text/chunking.py          split_text()
     text/lang.py              detect_lang()
+    text/limits.py            MAX_CHARS / MERGE_BELOW shared by split_text and plan_reading (not frozen)
 
   app/                        SYNC, no threads and no asyncio; ports only
     ports.py                  Clock, AudioOutput, VoiceRepository, SettingsStore, PlatformInfo, EngineProvider

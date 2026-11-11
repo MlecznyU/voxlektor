@@ -30,3 +30,18 @@ PL_PARAGRAPH_110 = (
     "Sprawdziłem testy i wszystko przechodzi. Jedyny problem to ostrzeżenie przy buildzie, "
     "ale nie blokuje niczego."
 )
+
+# Short paragraphs for plan_reading: one PL then one EN, and two PL ones.
+MIXED_PL_EN = "Zażółć gęślą jaźń.\n\nHello world, this is English."
+TWO_SHORT_PL = "Zażółć gęślą jaźń.\n\nWłaśnie sprawdziłem wszystkie testy."
+
+# Sentences of both languages for property tests of plan_reading.
+READING_SENTENCES: tuple[str, ...] = (
+    "Zażółć gęślą jaźń.",
+    "Właśnie sprawdziłem wszystkie testy.",
+    "Jedyny problem to ostrzeżenie przy buildzie, ale nie blokuje niczego.",
+    "Hello world, this is English.",
+    "I merged the branch.",
+    "I need to go to the store and buy some bread for the weekend.",
+    "npm run dev",
+)
