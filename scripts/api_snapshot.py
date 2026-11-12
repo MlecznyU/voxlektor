@@ -69,9 +69,14 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.adapters.audio.cues",
     "voxlektor.bootstrap.daemon",
     "voxlektor.entrypoints.daemon",
+    "voxlektor.adapters.transport.unix_client",
+    "voxlektor.adapters.procs.spawn",
+    "voxlektor.bootstrap.client",
+    "voxlektor.entrypoints.cli.app",
+    "voxlektor.entrypoints.oneshot",
 )
 # Typer applications as "module:attribute", extended by the CLI task.
-FROZEN_CLI: tuple[str, ...] = ()
+FROZEN_CLI: tuple[str, ...] = ("voxlektor.entrypoints.cli.app:app",)
 
 APPROVAL_MESSAGE = "API change requires owner approval — file an API change request"
 

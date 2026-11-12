@@ -27,6 +27,29 @@ def request(path: Path, line: bytes) -> p.Reply:
     return decode_reply(data)
 
 
+def wait_for_exit(pid: int, timeout: float = TIMEOUT) -> None:
+    """Block until process ``pid`` (any process of ours, not only a child) has exited.
+
+    Woken by a kqueue NOTE_EXIT event, so there is no polling.
+    """
+    kq = select.kqueue()
+    try:
+        watch = select.kevent(
+            pid,
+            filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        try:
+            events = kq.control([watch], 1, timeout)
+        except ProcessLookupError:
+            return  # already gone
+        if not events:
+            raise TimeoutError(f"process {pid} did not exit within {timeout} s")
+    finally:
+        kq.close()
+
+
 def wait_for_file(path: Path, timeout: float = TIMEOUT, *, present: bool = True) -> None:
     """Block until ``path`` exists (or, with ``present=False``, is gone).
 

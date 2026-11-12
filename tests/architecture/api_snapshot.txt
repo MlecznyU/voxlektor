@@ -1,3 +1,27 @@
+cli:vxl back
+cli:vxl config
+cli:vxl config show
+cli:vxl config voice
+cli:vxl config voice name (default=None)
+cli:vxl idle
+cli:vxl idle timeout (default=None)
+cli:vxl pause
+cli:vxl resume
+cli:vxl say
+cli:vxl say --lang -l (default=None)
+cli:vxl say --now (default=False)
+cli:vxl say --rate -r (default=None)
+cli:vxl say --voice -v (default=None)
+cli:vxl say -f (default=None)
+cli:vxl say text (default=None)
+cli:vxl serve
+cli:vxl serve --idle (default=None)
+cli:vxl skip
+cli:vxl status
+cli:vxl stop
+cli:vxl stop-reading
+cli:vxl unload
+cli:vxl voices
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer() -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.close(self) -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
@@ -42,6 +66,7 @@ voxlektor.adapters.platform.unsupported:UnsupportedPlatform.log_path(self) -> pa
 voxlektor.adapters.platform.unsupported:UnsupportedPlatform.pid_path(self) -> pathlib.Path
 voxlektor.adapters.platform.unsupported:UnsupportedPlatform.runtime_dir(self) -> pathlib.Path
 voxlektor.adapters.platform.unsupported:UnsupportedPlatform.socket_path(self) -> pathlib.Path
+voxlektor.adapters.procs.spawn:ensure_daemon(platform: voxlektor.app.ports.PlatformInfo, ping: collections.abc.Callable[[], bool], wait_s: float = 15.0) -> None
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore(path: pathlib.Path, environ: collections.abc.Mapping[str, str]) -> None
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_env(self) -> dict[str, object]
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_file(self) -> dict[str, object]
@@ -55,6 +80,7 @@ voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: s
 voxlektor.adapters.transport.mapping:error_reply(err: voxlektor.contracts.codec.ProtocolError) -> voxlektor.contracts.protocol.Reply
 voxlektor.adapters.transport.mapping:to_command(req: Request) -> Command
 voxlektor.adapters.transport.mapping:to_wire_reply(req_id: str, reply: voxlektor.app.effects.Reply) -> voxlektor.contracts.protocol.Reply
+voxlektor.adapters.transport.unix_client:request(path: pathlib.Path, req: dict[str, object], timeout: float = 5.0) -> dict[str, object]
 voxlektor.adapters.transport.unix_server:serve_unix(path: pathlib.Path, handler: _Handler, *, on_ready: collections.abc.Callable[[], None] | None) -> asyncio.base_events.Server
 voxlektor.app.commands:Back() -> None
 voxlektor.app.commands:Command = Command
@@ -150,6 +176,15 @@ voxlektor.app.voices:VoiceCatalog(repo: voxlektor.app.ports.VoiceRepository) -> 
 voxlektor.app.voices:VoiceCatalog.ensure_bundled(self) -> None
 voxlektor.app.voices:VoiceCatalog.list(self) -> list[str]
 voxlektor.app.voices:VoiceCatalog.resolve(self, name: str) -> voxlektor.contracts.engine.VoiceRef
+voxlektor.bootstrap.client:ClientContext(settings: voxlektor.domain.settings.Settings, platform: voxlektor.app.ports.PlatformInfo, store: voxlektor.app.ports.SettingsStore, config_path: pathlib.Path) -> None
+voxlektor.bootstrap.client:ClientContext.catalog(self) -> voxlektor.app.voices.VoiceCatalog
+voxlektor.bootstrap.client:ClientContext.config_path: pathlib.Path
+voxlektor.bootstrap.client:ClientContext.ensure(self) -> None
+voxlektor.bootstrap.client:ClientContext.platform: voxlektor.app.ports.PlatformInfo
+voxlektor.bootstrap.client:ClientContext.send(self, cmd: str, **args: object) -> dict[str, object]
+voxlektor.bootstrap.client:ClientContext.settings: voxlektor.domain.settings.Settings
+voxlektor.bootstrap.client:ClientContext.store: voxlektor.app.ports.SettingsStore
+voxlektor.bootstrap.client:build_client(flags: collections.abc.Mapping[str, object]) -> voxlektor.bootstrap.client.ClientContext
 voxlektor.bootstrap.daemon:Daemon(*args, **kwargs)
 voxlektor.bootstrap.daemon:Daemon.run(self) -> None
 voxlektor.bootstrap.daemon:build_daemon(settings: voxlektor.domain.settings.Settings, *, transport: bool, platform: voxlektor.app.ports.PlatformInfo | None = None, output: voxlektor.app.ports.AudioOutput | None = None, cues: voxlektor.app.ports.CuePlayer | None = None) -> voxlektor.bootstrap.daemon.Daemon
@@ -275,7 +310,9 @@ voxlektor.contracts.voicefmt:prompt_cache_name(engine_id: str, revision: str, pr
 voxlektor.domain.errors:DomainError(code: str, message: str) -> None
 voxlektor.domain.errors:InvalidDuration(message: str) -> None
 voxlektor.domain.errors:InvalidSetting(message: str) -> None
+voxlektor.domain.errors:NotRunning(message: str = 'voxlektor is not running') -> None
 voxlektor.domain.errors:PlatformError(message: str = 'platform not supported yet') -> None
+voxlektor.domain.errors:ServiceUnavailable(message: str = 'voxlektor is not running') -> None
 voxlektor.domain.errors:UnknownVoice(name: str, available: tuple[str, ...]) -> None
 voxlektor.domain.keepwarm:Action = Action
 voxlektor.domain.keepwarm:Busy() -> None
@@ -349,7 +386,9 @@ voxlektor.domain.types:ChunkId(x, /)
 voxlektor.domain.types:EngineId(x, /)
 voxlektor.domain.types:Epoch(x, /)
 voxlektor.domain.types:VoiceName(x, /)
+voxlektor.entrypoints.cli.app:main(argv: list[str] | None = None) -> int
 voxlektor.entrypoints.daemon:serve(settings: voxlektor.domain.settings.Settings) -> int
+voxlektor.entrypoints.oneshot:run(text: str, settings: voxlektor.domain.settings.Settings) -> int
 voxlektor.runtime.buffers:AudioBuffers(max_items: int = 8) -> None
 voxlektor.runtime.buffers:AudioBuffers.drop(self, ids: collections.abc.Iterable[voxlektor.domain.types.ChunkId]) -> None
 voxlektor.runtime.buffers:AudioBuffers.put(self, chunk_id: voxlektor.domain.types.ChunkId, audio: voxlektor.contracts.engine.AudioChunk) -> None

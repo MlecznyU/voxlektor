@@ -15,7 +15,7 @@ dependencies = [
     "numpy",
     "soundfile",
     "pytsmod",
-    "typer",
+    "typer>=0.29,<0.30",  # the CLI catches typer's vendored-click base exception (cli/app.py)
     "tomli-w",
 ]
 
@@ -96,7 +96,7 @@ banned-module-level-imports = ["numpy", "mlx", "mlx_audio", "sounddevice", "soun
 [tool.coverage.run]
 branch = true
 source = ["voxlektor"]
-omit = ["*/adapters/engines/*_mlx.py", "*/adapters/audio/sounddevice_out.py", "*/__main__.py"]
+omit = ["*/adapters/engines/*_mlx.py", "*/adapters/audio/sounddevice_out.py"]
 
 [tool.coverage.report]
 fail_under = 95
@@ -201,8 +201,18 @@ name = "CLI control path is lightweight"
 type = "forbidden"
 source_modules = ["voxlektor.entrypoints.cli"]
 forbidden_modules = ["numpy", "asyncio", "voxlektor.runtime", "voxlektor.adapters.audio", "voxlektor.bootstrap.daemon"]
-ignore_imports = ["voxlektor.entrypoints.cli.speak -> voxlektor.entrypoints.oneshot"]
-unmatched_ignore_imports_alerting = "none"
+# Each edge is a lazy, path-specific import; the runtime canaries in
+# tests/architecture/test_canaries.py (`test_cli_import_is_light`, `test_cli_status_run_is_light`)
+# prove the control path stays light when imported and when a command runs:
+# - one-shot mode (autostart = false) and `serve` import the engine stack inside the command;
+# - contracts.engine imports numpy only under TYPE_CHECKING (for the AudioChunk annotation);
+#   `test_cli_status_run_is_light` is what guards this ignore.
+ignore_imports = [
+    "voxlektor.entrypoints.cli.speak -> voxlektor.entrypoints.oneshot",
+    "voxlektor.entrypoints.cli.control -> voxlektor.entrypoints.daemon",
+    "voxlektor.contracts.engine -> numpy",
+]
+unmatched_ignore_imports_alerting = "error"
 
 [[tool.importlinter.contracts]]
 name = "Production does not import the test kit"

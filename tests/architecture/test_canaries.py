@@ -6,8 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 BIN = Path(sys.executable).parent
 
@@ -67,11 +65,11 @@ def test_ruff_bans_threading_in_domain(tmp_path: Path) -> None:
     assert "TID251" in result.stdout
 
 
-@pytest.mark.xfail(strict=True, reason="entrypoints/cli/app.py arrives in Task 10")
 def test_cli_import_is_light() -> None:
     code = (
         "import voxlektor.entrypoints.cli.app, sys; "
-        "bad={'mlx','numpy','sounddevice','mlx_audio'} & set(sys.modules); "
+        "bad={'mlx','numpy','sounddevice','mlx_audio','asyncio','voxlektor.runtime'} "
+        "& set(sys.modules); "
         "assert not bad, bad"
     )
     result = subprocess.run(  # noqa: S603
@@ -81,3 +79,29 @@ def test_cli_import_is_light() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_cli_status_run_is_light(short_tmp: Path) -> None:
+    """Running a control command (not just importing the CLI) loads nothing heavy either.
+
+    This is the run-time proof behind the ``contracts.engine -> numpy`` ignore of the
+    "CLI control path is lightweight" import-linter contract (that import is typing-only).
+    """
+    code = (
+        "import sys; from voxlektor.entrypoints.cli.app import main; "
+        "rc = main(['status']); "
+        "heavy = ('mlx', 'numpy', 'sounddevice', 'mlx_audio', 'asyncio', 'voxlektor.runtime'); "
+        "bad = {m for m in sys.modules if m.split('.')[0] in heavy or m.startswith(heavy)}; "
+        "assert rc == 0, rc; assert not bad, sorted(bad)"
+    )
+    env = {name: value for name, value in os.environ.items() if not name.startswith("VOXLEKTOR_")}
+    env["VOXLEKTOR_HOME"] = str(short_tmp)  # no daemon there: the socket is missing
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OFF"

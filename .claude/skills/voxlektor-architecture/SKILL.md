@@ -61,7 +61,7 @@ Binding map: `docs/architecture.md`. Rules are enforced by `lint-imports`, pyrig
 ## Add a CLI command
 
 1. `entrypoints/cli/<name>.py`; control path imports no numpy/asyncio/MLX/runtime.
-2. Exit codes: 0 ok, 1 user error, 2 service unavailable, 3 unsupported platform.
+2. Exit codes: 0 ok, 1 user error, 2 service unavailable, 3 unsupported platform, 130 interrupted.
 3. Test with the typer runner; run `test_cli_import_is_light`; update the README table and `api-add`.
 
 ## Add logic

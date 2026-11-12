@@ -27,6 +27,24 @@ class UnknownVoice(DomainError):
         self.available = available
 
 
+class ServiceUnavailable(DomainError):
+    """The daemon cannot be reached (not running, not answering, or not starting)."""
+
+    def __init__(self, message: str = "voxlektor is not running") -> None:
+        super().__init__("service_unavailable", message)
+
+
+class NotRunning(ServiceUnavailable):
+    """Nobody listens on the daemon's socket path (it is missing, refused or not a socket).
+
+    Only this case means "the daemon is off"; a timeout or a broken reply is a daemon that is
+    alive but not answering, which stays a plain ``ServiceUnavailable``.
+    """
+
+    def __init__(self, message: str = "voxlektor is not running") -> None:
+        super().__init__(message)
+
+
 class PlatformError(DomainError):
     def __init__(self, message: str = "platform not supported yet") -> None:
         super().__init__("unsupported_platform", message)

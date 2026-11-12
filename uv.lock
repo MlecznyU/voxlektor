@@ -984,7 +984,7 @@ requires-dist = [
     { name = "sounddevice" },
     { name = "soundfile" },
     { name = "tomli-w" },
-    { name = "typer" },
+    { name = "typer", specifier = ">=0.29,<0.30" },
 ]
 
 [package.metadata.requires-dev]

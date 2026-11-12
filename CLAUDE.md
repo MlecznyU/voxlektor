@@ -77,4 +77,5 @@ finish with a report (what was built, files, gate results, deviations) instead.
 - Test `Session` through the simulator (no threads, no sleeps).
 - Markers: `model` (real model, Apple Silicon), `audio` (real device), `e2e`. The default run
   excludes `model` and `audio` (`addopts`). Test names and messages are English.
+- `VOXLEKTOR_OUTPUT=memory` (device-less output and cues in the daemon) is for tests only.
 - `tests/architecture/` guards the architecture itself; keep it green and never weaken it.

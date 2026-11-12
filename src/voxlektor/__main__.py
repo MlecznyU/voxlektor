@@ -1,7 +1,8 @@
-"""Module entry point: ``python -m voxlektor``."""
+"""Module entry point: ``python -m voxlektor`` (also how the daemon is spawned)."""
 
-# The CLI module arrives in Task 10; drop the pyright ignore then.
-from voxlektor.entrypoints.cli.app import main  # pyright: ignore
+import sys
+
+from voxlektor.entrypoints.cli.app import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
