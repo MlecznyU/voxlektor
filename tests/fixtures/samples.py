@@ -31,6 +31,23 @@ PL_PARAGRAPH_110 = (
     "ale nie blokuje niczego."
 )
 
+# Three-paragraph texts of a typical conversation reply (copied from the tts-lab benchmark);
+# scripts/bench_gaps.py reads them aloud once per voice, rate and language.
+BENCH_PARAGRAPHS_PL: tuple[str, ...] = (
+    "Sprawdziłem testy i wszystko przechodzi. Jedyny problem to ostrzeżenie przy buildzie, "
+    "ale nie blokuje niczego.",
+    "Mam dwie opcje. Pierwsza jest szybsza, ale trudniej ją potem rozbudować. Druga zajmie "
+    "więcej czasu, za to zostawi nam porządny fundament.",
+    "Polecam drugą. Który kierunek wybierasz?",
+)
+BENCH_PARAGRAPHS_EN: tuple[str, ...] = (
+    "I checked the tests and everything passes. The only issue is a build warning, but it "
+    "doesn't block anything.",
+    "There are two options. The first is faster, but harder to extend later. The second takes "
+    "longer, but leaves us a solid foundation.",
+    "I'd go with the second. Which way do you want to go?",
+)
+
 # Short paragraphs for plan_reading: one PL then one EN, and two PL ones.
 MIXED_PL_EN = "Zażółć gęślą jaźń.\n\nHello world, this is English."
 TWO_SHORT_PL = "Zażółć gęślą jaźń.\n\nWłaśnie sprawdziłem wszystkie testy."
