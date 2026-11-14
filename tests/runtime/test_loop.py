@@ -39,12 +39,12 @@ from voxlektor.testing.fakes import FakeEngine, InMemoryVoiceRepository
 TIMEOUT = 10.0
 VOICE = "v0-default"
 REF = VoiceRef(VOICE, Path("/voices/v0-default/ref.wav"), "reference transcript")
+# Under the first-chunk cap (120) and above the merge threshold (60): one chunk per paragraph.
 SENTENCE = (
     "The quick brown fox jumps over the lazy dog near the river bank while the morning sun "
-    "rises slowly above the distant hills and the birds sing their songs to the waking world "
-    "around them all."
+    "rises above the hills."
 )
-THREE_CHUNKS = " ".join([SENTENCE] * 3)
+THREE_CHUNKS = "\n\n".join([SENTENCE] * 3)
 
 
 class _Monotonic:
@@ -363,6 +363,19 @@ def test_generation_failures_retry_with_cues_then_stop() -> None:
     _run(rig, scenario)
     assert rig.cues.played == [Cue.RETRY, Cue.RETRY, Cue.STOPPED]
     assert len(rig.provider.engines) == 2  # the second failure reloaded the engine
+
+
+@pytest.mark.usefixtures("no_leaked_threads")
+def test_cues_are_played_at_the_volume_of_the_reading() -> None:
+    rig = _rig(make=lambda: FakeEngine(fail_on="BOOM"))
+
+    async def scenario(rig: _Rig) -> None:
+        speak = Speak("This sentence goes BOOM right away.", None, "en", None, False, volume=35)
+        await rig.core.handle(speak)
+        await rig.session.until(lambda: rig.status()["last_error"] is not None)
+
+    _run(rig, scenario)
+    assert rig.cues.calls == [(Cue.RETRY, 35), (Cue.RETRY, 35), (Cue.STOPPED, 35)]
 
 
 @pytest.mark.usefixtures("no_leaked_threads")

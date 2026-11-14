@@ -12,10 +12,21 @@ cli:vxl say --lang -l (default=None)
 cli:vxl say --now (default=False)
 cli:vxl say --rate -r (default=None)
 cli:vxl say --voice -v (default=None)
+cli:vxl say --volume (default=None)
 cli:vxl say -f (default=None)
 cli:vxl say text (default=None)
 cli:vxl serve
 cli:vxl serve --idle (default=None)
+cli:vxl setup
+cli:vxl setup --accept-model-license (default=False)
+cli:vxl setup --autostart (default=None)
+cli:vxl setup --base-lang (default=None)
+cli:vxl setup --engine (default=None)
+cli:vxl setup --idle (default=None)
+cli:vxl setup --rate (default=None)
+cli:vxl setup --voice (default=None)
+cli:vxl setup --volume (default=None)
+cli:vxl setup --yes (default=False)
 cli:vxl skip
 cli:vxl status
 cli:vxl stop
@@ -24,11 +35,13 @@ cli:vxl unload
 cli:vxl voices
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer() -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.close(self) -> None
-voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
+voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.play(self, cue: voxlektor.app.effects.Cue, volume: int = 50) -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.release_idle_stream(self) -> bool
+voxlektor.adapters.audio.dsp:gain(volume: int) -> float
+voxlektor.adapters.audio.dsp:level(samples: NDArray[numpy.float32], sample_rate: int, volume: int) -> NDArray[numpy.float32]
 voxlektor.adapters.audio.dsp:time_stretch(samples: NDArray[numpy.float32], rate: float) -> NDArray[numpy.float32]
 voxlektor.adapters.audio.memory_out:MemoryCuePlayer() -> None
-voxlektor.adapters.audio.memory_out:MemoryCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
+voxlektor.adapters.audio.memory_out:MemoryCuePlayer.play(self, cue: voxlektor.app.effects.Cue, volume: int = 50) -> None
 voxlektor.adapters.audio.memory_out:MemoryOutput(auto_complete: bool = True) -> None
 voxlektor.adapters.audio.memory_out:MemoryOutput.abort(self) -> None
 voxlektor.adapters.audio.memory_out:MemoryOutput.complete(self, chunk: voxlektor.domain.types.ChunkId) -> None
@@ -57,6 +70,12 @@ voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.synthesize(self, text: 
 voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.unload(self) -> None
 voxlektor.adapters.engines.omnivoice_mlx:PROMPT_FORMAT = 1
 voxlektor.adapters.engines.omnivoice_mlx:REPO = 'mlx-community/OmniVoice-bf16'
+voxlektor.adapters.engines.omnivoice_model:MODEL = ModelInfo(engine_id='omnivoice', title='OmniVoice (k2-fsa), 0.6B, bf16', repo='mlx-community/OmniVoice-bf16', revision='8fb0b754cad788aaefec690cd55c207e8a628f85', size_bytes=1700000000, license_name='CC-BY-NC-4.0', license_url='https://huggingface.co/k2-fsa/OmniVoice', commercial_use=False, hidden=False)
+voxlektor.adapters.engines.omnivoice_model:OMNIVOICE_REVISION = '8fb0b754cad788aaefec690cd55c207e8a628f85'
+voxlektor.adapters.engines.omnivoice_model:REPO = 'mlx-community/OmniVoice-bf16'
+voxlektor.adapters.models.hf_cache:HfModelStore()
+voxlektor.adapters.models.hf_cache:HfModelStore.download(self, info: voxlektor.contracts.engine.ModelInfo, progress: collections.abc.Callable[[int, int], None]) -> None
+voxlektor.adapters.models.hf_cache:HfModelStore.is_present(self, info: voxlektor.contracts.engine.ModelInfo) -> bool
 voxlektor.adapters.platform.macos:MacOSPlatform(home: pathlib.Path | None = None) -> None
 voxlektor.adapters.platform.macos:MacOSPlatform.config_dir(self) -> pathlib.Path
 voxlektor.adapters.platform.macos:MacOSPlatform.log_path(self) -> pathlib.Path
@@ -71,8 +90,10 @@ voxlektor.adapters.platform.unsupported:UnsupportedPlatform.runtime_dir(self) ->
 voxlektor.adapters.platform.unsupported:UnsupportedPlatform.socket_path(self) -> pathlib.Path
 voxlektor.adapters.procs.spawn:ensure_daemon(platform: voxlektor.app.ports.PlatformInfo, ping: collections.abc.Callable[[], bool], wait_s: float = 15.0) -> None
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore(path: pathlib.Path, environ: collections.abc.Mapping[str, str]) -> None
+voxlektor.adapters.storage.settings_toml:TomlSettingsStore.mark_setup_completed(self) -> None
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_env(self) -> dict[str, object]
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.read_file(self) -> dict[str, object]
+voxlektor.adapters.storage.settings_toml:TomlSettingsStore.setup_completed(self) -> bool
 voxlektor.adapters.storage.settings_toml:TomlSettingsStore.write_value(self, key: str, value: str) -> None
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository(root: pathlib.Path) -> None
 voxlektor.adapters.storage.voices_fs:FsVoiceRepository.install_bundled(self) -> None
@@ -94,13 +115,14 @@ voxlektor.app.commands:SetIdle(timeout: str) -> None
 voxlektor.app.commands:SetIdle.timeout: str
 voxlektor.app.commands:Shutdown() -> None
 voxlektor.app.commands:Skip() -> None
-voxlektor.app.commands:Speak(text: str, voice: str | None, lang: Optional[Literal['auto', 'pl', 'en']], rate: float | None, now: bool, *, base_lang: Optional[Literal['pl', 'en']] = None) -> None
+voxlektor.app.commands:Speak(text: str, voice: str | None, lang: Optional[Literal['auto', 'pl', 'en']], rate: float | None, now: bool, *, base_lang: Optional[Literal['pl', 'en']] = None, volume: int | None = None) -> None
 voxlektor.app.commands:Speak.base_lang: Optional[Literal['pl', 'en']]
 voxlektor.app.commands:Speak.lang: Optional[Literal['auto', 'pl', 'en']]
 voxlektor.app.commands:Speak.now: bool
 voxlektor.app.commands:Speak.rate: float | None
 voxlektor.app.commands:Speak.text: str
 voxlektor.app.commands:Speak.voice: str | None
+voxlektor.app.commands:Speak.volume: int | None
 voxlektor.app.commands:Status() -> None
 voxlektor.app.commands:StopReading() -> None
 voxlektor.app.commands:Unload() -> None
@@ -122,8 +144,9 @@ voxlektor.app.effects:Outcome(reply: voxlektor.app.effects.Reply | None, effects
 voxlektor.app.effects:Outcome.effects: list[Effect]
 voxlektor.app.effects:Outcome.reply: voxlektor.app.effects.Reply | None
 voxlektor.app.effects:PausePlayback() -> None
-voxlektor.app.effects:PlayCue(cue: voxlektor.app.effects.Cue) -> None
+voxlektor.app.effects:PlayCue(cue: voxlektor.app.effects.Cue, volume: int = 50) -> None
 voxlektor.app.effects:PlayCue.cue: voxlektor.app.effects.Cue
+voxlektor.app.effects:PlayCue.volume: int
 voxlektor.app.effects:PrepareVoice(ref: voxlektor.contracts.engine.VoiceRef, fresh: bool = False) -> None
 voxlektor.app.effects:PrepareVoice.fresh: bool
 voxlektor.app.effects:PrepareVoice.ref: voxlektor.contracts.engine.VoiceRef
@@ -146,18 +169,33 @@ voxlektor.app.ports:AudioOutput.start(self, chunk: voxlektor.domain.types.ChunkI
 voxlektor.app.ports:Clock(*args, **kwargs)
 voxlektor.app.ports:Clock.now(self) -> float
 voxlektor.app.ports:CuePlayer(*args, **kwargs)
-voxlektor.app.ports:CuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
+voxlektor.app.ports:CuePlayer.play(self, cue: voxlektor.app.effects.Cue, volume: int = 50) -> None
 voxlektor.app.ports:EngineProvider(*args, **kwargs)
 voxlektor.app.ports:EngineProvider.__call__(self, engine_id: str) -> voxlektor.contracts.engine.Engine
+voxlektor.app.ports:ModelStore(*args, **kwargs)
+voxlektor.app.ports:ModelStore.download(self, info: voxlektor.contracts.engine.ModelInfo, progress: collections.abc.Callable[[int, int], None]) -> None
+voxlektor.app.ports:ModelStore.is_present(self, info: voxlektor.contracts.engine.ModelInfo) -> bool
+voxlektor.app.ports:Option(value: str, label: str) -> None
+voxlektor.app.ports:Option.label: str
+voxlektor.app.ports:Option.value: str
 voxlektor.app.ports:PlatformInfo(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.log_path(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.pid_path(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.runtime_dir(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.socket_path(self) -> pathlib.Path
+voxlektor.app.ports:Prompter(*args, **kwargs)
+voxlektor.app.ports:Prompter.choose(self, question: str, options: list[voxlektor.app.ports.Option], default: str) -> str
+voxlektor.app.ports:Prompter.confirm(self, question: str, default: bool) -> bool
+voxlektor.app.ports:Prompter.number(self, question: str, low: float, high: float, default: float) -> float
+voxlektor.app.ports:Prompter.say(self, line: str) -> None
+voxlektor.app.ports:SamplePlayer(*args, **kwargs)
+voxlektor.app.ports:SamplePlayer.play(self, text: str, voice: str, lang: Literal['pl', 'en'], rate: float, volume: int) -> None
 voxlektor.app.ports:SettingsStore(*args, **kwargs)
+voxlektor.app.ports:SettingsStore.mark_setup_completed(self) -> None
 voxlektor.app.ports:SettingsStore.read_env(self) -> dict[str, object]
 voxlektor.app.ports:SettingsStore.read_file(self) -> dict[str, object]
+voxlektor.app.ports:SettingsStore.setup_completed(self) -> bool
 voxlektor.app.ports:SettingsStore.write_value(self, key: str, value: str) -> None
 voxlektor.app.ports:VoiceRepository(*args, **kwargs)
 voxlektor.app.ports:VoiceRepository.install_bundled(self) -> None
@@ -177,6 +215,15 @@ voxlektor.app.session:Session.on_prompt_failed(self, voice: str, msg: str) -> li
 voxlektor.app.session:Session.on_prompt_ready(self, voice: str) -> list[Effect]
 voxlektor.app.session:Session.on_unloaded(self) -> list[Effect]
 voxlektor.app.session:Session.on_wake(self) -> list[Effect]
+voxlektor.app.setup:Option(value: str, label: str) -> None
+voxlektor.app.setup:Option.label: str
+voxlektor.app.setup:Option.value: str
+voxlektor.app.setup:SetupCancelled(message: str = 'setup cancelled; nothing was changed') -> None
+voxlektor.app.setup:SetupResult(values: dict[str, str], changed: bool) -> None
+voxlektor.app.setup:SetupResult.changed: bool
+voxlektor.app.setup:SetupResult.values: dict[str, str]
+voxlektor.app.setup:apply_flags(store: voxlektor.app.ports.SettingsStore, models: voxlektor.app.ports.ModelStore, engines: list[voxlektor.contracts.engine.ModelInfo], current: voxlektor.domain.settings.Settings, flags: collections.abc.Mapping[str, object], accept_license: bool) -> voxlektor.app.setup.SetupResult
+voxlektor.app.setup:run_interactive(store: voxlektor.app.ports.SettingsStore, prompter: voxlektor.app.ports.Prompter, player: voxlektor.app.ports.SamplePlayer, models: voxlektor.app.ports.ModelStore, engines: list[voxlektor.contracts.engine.ModelInfo], voices: list[str], current: voxlektor.domain.settings.Settings) -> voxlektor.app.setup.SetupResult
 voxlektor.app.voice_prompts:get_or_build_prompt(engine: voxlektor.contracts.engine.Engine, repo: voxlektor.app.ports.VoiceRepository, ref: voxlektor.contracts.engine.VoiceRef, *, fresh: bool = False) -> voxlektor.contracts.engine.VoicePrompt
 voxlektor.app.voices:VoiceCatalog(repo: voxlektor.app.ports.VoiceRepository) -> None
 voxlektor.app.voices:VoiceCatalog.ensure_bundled(self) -> None
@@ -190,13 +237,19 @@ voxlektor.bootstrap.client:ClientContext.platform: voxlektor.app.ports.PlatformI
 voxlektor.bootstrap.client:ClientContext.send(self, cmd: str, **args: object) -> dict[str, object]
 voxlektor.bootstrap.client:ClientContext.settings: voxlektor.domain.settings.Settings
 voxlektor.bootstrap.client:ClientContext.store: voxlektor.app.ports.SettingsStore
+voxlektor.bootstrap.client:DaemonSamplePlayer(ctx: voxlektor.bootstrap.client.ClientContext) -> None
+voxlektor.bootstrap.client:DaemonSamplePlayer.play(self, text: str, voice: str, lang: Literal['pl', 'en'], rate: float, volume: int) -> None
 voxlektor.bootstrap.client:build_client(flags: collections.abc.Mapping[str, object]) -> voxlektor.bootstrap.client.ClientContext
+voxlektor.bootstrap.client:build_setup_client(warn: collections.abc.Callable[[str], None]) -> tuple[voxlektor.bootstrap.client.ClientContext, voxlektor.domain.settings.Settings]
+voxlektor.bootstrap.client:model_store() -> voxlektor.app.ports.ModelStore
+voxlektor.bootstrap.client:setup_prompter() -> voxlektor.app.ports.Prompter
 voxlektor.bootstrap.daemon:Daemon(*args, **kwargs)
 voxlektor.bootstrap.daemon:Daemon.loop: voxlektor.runtime.loop.CoreLoop
 voxlektor.bootstrap.daemon:async Daemon.run(self) -> None
 voxlektor.bootstrap.daemon:build_daemon(settings: voxlektor.domain.settings.Settings, *, transport: bool, platform: voxlektor.app.ports.PlatformInfo | None = None, output: voxlektor.app.ports.AudioOutput | None = None, cues: voxlektor.app.ports.CuePlayer | None = None) -> voxlektor.bootstrap.daemon.Daemon
 voxlektor.bootstrap.environment:prepare() -> None
 voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str, macos_version: str) -> voxlektor.app.ports.PlatformInfo
+voxlektor.bootstrap.registry:engine_models(include_hidden: bool = False) -> list[voxlektor.contracts.engine.ModelInfo]
 voxlektor.bootstrap.registry:load_engine(engine_id: str) -> voxlektor.contracts.engine.Engine
 voxlektor.contracts.codec:ProtocolError(code: voxlektor.contracts.protocol.ErrorCode, message: str, request_id: str | None = None) -> None
 voxlektor.contracts.codec:decode_reply(line: bytes) -> voxlektor.contracts.protocol.Reply
@@ -226,6 +279,16 @@ voxlektor.contracts.engine:EngineSpec.langs: frozenset[str]
 voxlektor.contracts.engine:EngineSpec.prompt_format: int
 voxlektor.contracts.engine:EngineSpec.revision: str
 voxlektor.contracts.engine:EngineSpec.sample_rate: int
+voxlektor.contracts.engine:ModelInfo(engine_id: str, title: str, repo: str, revision: str, size_bytes: int, license_name: str, license_url: str, commercial_use: bool, hidden: bool = False) -> None
+voxlektor.contracts.engine:ModelInfo.commercial_use: bool
+voxlektor.contracts.engine:ModelInfo.engine_id: str
+voxlektor.contracts.engine:ModelInfo.hidden: bool
+voxlektor.contracts.engine:ModelInfo.license_name: str
+voxlektor.contracts.engine:ModelInfo.license_url: str
+voxlektor.contracts.engine:ModelInfo.repo: str
+voxlektor.contracts.engine:ModelInfo.revision: str
+voxlektor.contracts.engine:ModelInfo.size_bytes: int
+voxlektor.contracts.engine:ModelInfo.title: str
 voxlektor.contracts.engine:VoicePrompt(voice: str, prompt_format: int, data: object) -> None
 voxlektor.contracts.engine:VoicePrompt.data: object
 voxlektor.contracts.engine:VoicePrompt.prompt_format: int
@@ -289,7 +352,7 @@ voxlektor.contracts.protocol:SkipRequest(v: int, id: str)
 voxlektor.contracts.protocol:SkipRequest.id: str
 voxlektor.contracts.protocol:SkipRequest.v: int
 voxlektor.contracts.protocol:SpeakRequest [tag_field='cmd', tag='speak']
-voxlektor.contracts.protocol:SpeakRequest(v: int, id: str, text: str, voice: str | None = None, lang: Optional[Literal['auto', 'pl', 'en']] = None, rate: float | None = None, now: bool = False, base_lang: Optional[Literal['pl', 'en']] = None)
+voxlektor.contracts.protocol:SpeakRequest(v: int, id: str, text: str, voice: str | None = None, lang: Optional[Literal['auto', 'pl', 'en']] = None, rate: float | None = None, now: bool = False, base_lang: Optional[Literal['pl', 'en']] = None, volume: Optional[Annotated[int, msgspec.Meta(ge=0, le=100)]] = None)
 voxlektor.contracts.protocol:SpeakRequest.base_lang: Optional[Literal['pl', 'en']]
 voxlektor.contracts.protocol:SpeakRequest.id: str
 voxlektor.contracts.protocol:SpeakRequest.lang: Optional[Literal['auto', 'pl', 'en']]
@@ -298,6 +361,7 @@ voxlektor.contracts.protocol:SpeakRequest.rate: float | None
 voxlektor.contracts.protocol:SpeakRequest.text: str
 voxlektor.contracts.protocol:SpeakRequest.v: int
 voxlektor.contracts.protocol:SpeakRequest.voice: str | None
+voxlektor.contracts.protocol:SpeakRequest.volume: Optional[Annotated[int, msgspec.Meta(ge=0, le=100)]]
 voxlektor.contracts.protocol:StatusRequest [tag_field='cmd', tag='status']
 voxlektor.contracts.protocol:StatusRequest(v: int, id: str)
 voxlektor.contracts.protocol:StatusRequest.id: str
@@ -384,16 +448,17 @@ voxlektor.domain.playback:PlaybackQueue.skip(self) -> Optional[A]
 voxlektor.domain.playback:PlaybackQueue.start_next(self) -> Optional[A]
 voxlektor.domain.reading:AheadWindow(ahead: int) -> None
 voxlektor.domain.reading:AheadWindow.next_to_generate(self, pending: collections.abc.Sequence[voxlektor.domain.reading.Chunk], generated_unplayed: int) -> voxlektor.domain.reading.Chunk | None
-voxlektor.domain.reading:Chunk(id: voxlektor.domain.types.ChunkId, text: str, lang: Literal['pl', 'en'], rate: float, epoch: voxlektor.domain.types.Epoch) -> None
+voxlektor.domain.reading:Chunk(id: voxlektor.domain.types.ChunkId, text: str, lang: Literal['pl', 'en'], rate: float, epoch: voxlektor.domain.types.Epoch, volume: int = 50) -> None
 voxlektor.domain.reading:Chunk.epoch: voxlektor.domain.types.Epoch
 voxlektor.domain.reading:Chunk.id: voxlektor.domain.types.ChunkId
 voxlektor.domain.reading:Chunk.lang: Literal['pl', 'en']
 voxlektor.domain.reading:Chunk.rate: float
 voxlektor.domain.reading:Chunk.text: str
+voxlektor.domain.reading:Chunk.volume: int
 voxlektor.domain.reading:UnderrunTracker() -> None
 voxlektor.domain.reading:UnderrunTracker.on_queue_empty(self, more_expected: bool) -> None
-voxlektor.domain.reading:plan_reading(text: str, lang: Literal['auto', 'pl', 'en'], base_lang: Literal['pl', 'en'], rate: float, epoch: voxlektor.domain.types.Epoch, first_id: int) -> list[voxlektor.domain.reading.Chunk]
-voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', base_lang: Literal['pl', 'en'] = 'pl', rate: float = 1.0, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
+voxlektor.domain.reading:plan_reading(text: str, lang: Literal['auto', 'pl', 'en'], base_lang: Literal['pl', 'en'], rate: float, epoch: voxlektor.domain.types.Epoch, first_id: int, *, volume: int = 50) -> list[voxlektor.domain.reading.Chunk]
+voxlektor.domain.settings:Settings(engine: voxlektor.domain.types.EngineId = 'omnivoice', voice: voxlektor.domain.types.VoiceName = 'v0-default', lang: Literal['auto', 'pl', 'en'] = 'auto', base_lang: Literal['pl', 'en'] = 'pl', rate: float = 1.0, volume: int = 50, idle_timeout_s: int = 600, autostart: bool = True, history: int = 20, ahead: int = 2) -> None
 voxlektor.domain.settings:Settings.ahead: int
 voxlektor.domain.settings:Settings.autostart: bool
 voxlektor.domain.settings:Settings.base_lang: Literal['pl', 'en']
@@ -403,6 +468,7 @@ voxlektor.domain.settings:Settings.idle_timeout_s: int
 voxlektor.domain.settings:Settings.lang: Literal['auto', 'pl', 'en']
 voxlektor.domain.settings:Settings.rate: float
 voxlektor.domain.settings:Settings.voice: voxlektor.domain.types.VoiceName
+voxlektor.domain.settings:Settings.volume: int
 voxlektor.domain.settings:merge_layers(*layers: collections.abc.Mapping[str, object]) -> voxlektor.domain.settings.Settings
 voxlektor.domain.settings:parse_duration(s: str) -> int
 voxlektor.domain.text.chunking:split_text(text: str, max_chars: int = 300, merge_below: int = 60) -> list[str]
@@ -421,7 +487,7 @@ voxlektor.runtime.buffers:AudioBuffers(max_items: int = 8) -> None
 voxlektor.runtime.buffers:AudioBuffers.drop(self, ids: collections.abc.Iterable[voxlektor.domain.types.ChunkId]) -> None
 voxlektor.runtime.buffers:AudioBuffers.put(self, chunk_id: voxlektor.domain.types.ChunkId, audio: voxlektor.contracts.engine.AudioChunk) -> None
 voxlektor.runtime.buffers:AudioBuffers.take(self, chunk_id: voxlektor.domain.types.ChunkId) -> voxlektor.contracts.engine.AudioChunk
-voxlektor.runtime.engine_worker:EngineWorker(provider: 'EngineProvider', repo: 'VoiceRepository', stretch: 'Callable[[npt.NDArray[np.float32], float], npt.NDArray[np.float32]]') -> 'None'
+voxlektor.runtime.engine_worker:EngineWorker(provider: 'EngineProvider', repo: 'VoiceRepository', stretch: 'Callable[[npt.NDArray[np.float32], float], npt.NDArray[np.float32]]', level: 'Callable[[npt.NDArray[np.float32], int, int], npt.NDArray[np.float32]] | None' = None) -> 'None'
 voxlektor.runtime.engine_worker:EngineWorker.cancel_before(self, epoch: voxlektor.domain.types.Epoch) -> None
 voxlektor.runtime.engine_worker:EngineWorker.close(self) -> None
 voxlektor.runtime.engine_worker:EngineWorker.submit(self, job: voxlektor.app.effects.LoadEngine | voxlektor.app.effects.UnloadEngine | voxlektor.app.effects.PrepareVoice | voxlektor.app.effects.Generate, on_result: collections.abc.Callable[[tuple[voxlektor.contracts.engine.AudioChunk, float] | None], None], on_error: collections.abc.Callable[[str], None]) -> None
@@ -430,6 +496,7 @@ voxlektor.runtime.loop:CoreLoop.execute(self, effects: list[Effect]) -> None
 voxlektor.runtime.loop:async CoreLoop.handle(self, cmd: Command) -> voxlektor.app.effects.Reply
 voxlektor.runtime.loop:async CoreLoop.run_until_stopped(self) -> None
 voxlektor.testing.engine_contract:run_engine_contract(engine: voxlektor.contracts.engine.Engine, ref: voxlektor.contracts.engine.VoiceRef) -> None
+voxlektor.testing.fakes:FAKE_MODEL = ModelInfo(engine_id='fake', title='Fake engine (tests only)', repo='', revision='fake0001', size_bytes=0, license_name='Apache-2.0', license_url='https://github.com/MlecznyU/voxlektor', commercial_use=True, hidden=True)
 voxlektor.testing.fakes:FakeClock(t: float = 0.0) -> None
 voxlektor.testing.fakes:FakeClock.advance(self, s: float) -> None
 voxlektor.testing.fakes:FakeClock.now(self) -> float

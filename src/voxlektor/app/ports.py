@@ -1,12 +1,13 @@
 """Ports: what the application needs from the outside world."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from voxlektor.app.effects import Cue
-from voxlektor.contracts.engine import Engine, VoiceRef
-from voxlektor.domain.types import ChunkId
+from voxlektor.contracts.engine import Engine, ModelInfo, VoiceRef
+from voxlektor.domain.types import ChunkId, Lang
 
 
 class Clock(Protocol):
@@ -36,9 +37,12 @@ class AudioOutput(Protocol):
 
 
 class CuePlayer(Protocol):
-    """Plays a short cue next to the reading (also while it is paused); never raises."""
+    """Plays a short cue next to the reading (also while it is paused); never raises.
 
-    def play(self, cue: Cue) -> None: ...
+    ``volume`` (0..100, 50 = the even level) is the volume of the reading the cue belongs to.
+    """
+
+    def play(self, cue: Cue, volume: int = 50) -> None: ...
 
 
 class SettingsStore(Protocol):
@@ -47,6 +51,53 @@ class SettingsStore(Protocol):
     def read_env(self) -> dict[str, object]: ...
 
     def write_value(self, key: str, value: str) -> None: ...
+
+    def setup_completed(self) -> bool: ...
+
+    def mark_setup_completed(self) -> None:
+        """Record that ``vxl setup`` finished; keeps every other key and table."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class Option:
+    """One menu entry of ``Prompter.choose``: ``value`` is returned, ``label`` is shown.
+
+    Re-exported by ``app.setup`` (its documented home): defined here because ``app.setup``
+    needs these ports, and pyright reports an import cycle even for typing-only imports.
+    """
+
+    value: str
+    label: str
+
+
+class Prompter(Protocol):
+    """Asks the user during setup; an answer method raises ``SetupCancelled`` on cancel."""
+
+    def choose(self, question: str, options: list[Option], default: str) -> str: ...
+
+    def number(self, question: str, low: float, high: float, default: float) -> float: ...
+
+    def confirm(self, question: str, default: bool) -> bool: ...
+
+    def say(self, line: str) -> None: ...
+
+
+class SamplePlayer(Protocol):
+    def play(self, text: str, voice: str, lang: Lang, rate: float, volume: int) -> None:
+        """Read ``text`` aloud and return once it has been heard."""
+        ...
+
+
+class ModelStore(Protocol):
+    def is_present(self, info: ModelInfo) -> bool: ...
+
+    def download(self, info: ModelInfo, progress: Callable[[int, int], None]) -> None:
+        """Fetch the model, reporting ``progress(done, total)`` in bytes.
+
+        Raises ``ServiceUnavailable`` when the download fails.
+        """
+        ...
 
 
 class PlatformInfo(Protocol):

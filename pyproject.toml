@@ -3,6 +3,8 @@ name = "voxlektor"
 version = "0.1.0"
 description = "Local text-to-speech service and CLI"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "toma", email = "toma.herc@gmail.com" }
 ]
@@ -17,7 +19,13 @@ dependencies = [
     "pytsmod",
     "typer>=0.29,<0.30",  # the CLI catches typer's vendored-click base exception (cli/app.py)
     "tomli-w",
+    "huggingface_hub",  # model download in `vxl setup` (also used by the OmniVoice engine)
+    "questionary",  # `vxl setup` menus; imported only inside the setup command
 ]
+
+[project.urls]
+Homepage = "https://github.com/MlecznyU/voxlektor"
+Issues = "https://github.com/MlecznyU/voxlektor/issues"
 
 [project.scripts]
 voxlektor = "voxlektor.entrypoints.cli.app:main"
@@ -26,6 +34,11 @@ vxl = "voxlektor.entrypoints.cli.app:main"
 [project.entry-points."voxlektor.engines"]
 omnivoice = "voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine"
 fake = "voxlektor.testing.fakes:FakeEngine"
+
+# Light model descriptions (contracts.engine.ModelInfo); importing them loads no ML framework.
+[project.entry-points."voxlektor.engine_models"]
+omnivoice = "voxlektor.adapters.engines.omnivoice_model:MODEL"
+fake = "voxlektor.testing.fakes:FAKE_MODEL"
 
 [dependency-groups]
 dev = [
@@ -166,13 +179,13 @@ forbidden_modules = ["mlx", "mlx_audio", "torch", "sounddevice", "soundfile", "p
 [[tool.importlinter.contracts]]
 name = "ML frameworks only in engine adapters"
 type = "forbidden"
-source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.audio", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.bootstrap", "voxlektor.entrypoints"]
+source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.audio", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.adapters.models", "voxlektor.adapters.terminal", "voxlektor.bootstrap", "voxlektor.entrypoints"]
 forbidden_modules = ["mlx", "mlx_audio", "torch"]
 
 [[tool.importlinter.contracts]]
 name = "Audio libs only in audio adapters"
 type = "forbidden"
-source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.engines", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.bootstrap", "voxlektor.entrypoints"]
+source_modules = ["voxlektor.contracts", "voxlektor.domain", "voxlektor.app", "voxlektor.runtime", "voxlektor.adapters.engines", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.adapters.models", "voxlektor.adapters.terminal", "voxlektor.bootstrap", "voxlektor.entrypoints"]
 forbidden_modules = ["sounddevice", "soundfile", "pytsmod"]
 # Wiring picks the concrete audio adapters (owner ruling K1, Task 9).
 ignore_imports = [
@@ -184,7 +197,7 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "Adapter families are independent"
 type = "independence"
-modules = ["voxlektor.adapters.engines", "voxlektor.adapters.audio", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs"]
+modules = ["voxlektor.adapters.engines", "voxlektor.adapters.audio", "voxlektor.adapters.storage", "voxlektor.adapters.platform", "voxlektor.adapters.transport", "voxlektor.adapters.procs", "voxlektor.adapters.models", "voxlektor.adapters.terminal"]
 
 [[tool.importlinter.contracts]]
 name = "Engines are discovered, never imported"

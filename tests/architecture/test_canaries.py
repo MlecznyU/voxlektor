@@ -95,7 +95,8 @@ def test_ruff_bans_threading_in_domain(tmp_path: Path) -> None:
 def test_cli_import_is_light() -> None:
     code = (
         "import voxlektor.entrypoints.cli.app, sys; "
-        "bad={'mlx','numpy','sounddevice','mlx_audio','asyncio','voxlektor.runtime'} "
+        "bad={'mlx','numpy','sounddevice','mlx_audio','asyncio','voxlektor.runtime',"
+        "'questionary','prompt_toolkit','huggingface_hub','importlib.metadata'} "
         "& set(sys.modules); "
         "assert not bad, bad"
     )
@@ -117,7 +118,8 @@ def test_cli_status_run_is_light(short_tmp: Path) -> None:
     code = (
         "import sys; from voxlektor.entrypoints.cli.app import main; "
         "rc = main(['status']); "
-        "heavy = ('mlx', 'numpy', 'sounddevice', 'mlx_audio', 'asyncio', 'voxlektor.runtime'); "
+        "heavy = ('mlx', 'numpy', 'sounddevice', 'mlx_audio', 'asyncio', 'voxlektor.runtime', "
+        "'questionary', 'prompt_toolkit', 'huggingface_hub'); "
         "bad = {m for m in sys.modules if m.split('.')[0] in heavy or m.startswith(heavy)}; "
         "assert rc == 0, rc; assert not bad, sorted(bad)"
     )

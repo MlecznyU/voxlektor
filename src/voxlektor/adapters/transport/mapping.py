@@ -43,7 +43,15 @@ _PLAIN: dict[type[wire.Request], Callable[[], Command]] = {
 
 def to_command(req: wire.Request) -> Command:
     if isinstance(req, wire.SpeakRequest):
-        return Speak(req.text, req.voice, req.lang, req.rate, req.now, base_lang=req.base_lang)
+        return Speak(
+            req.text,
+            req.voice,
+            req.lang,
+            req.rate,
+            req.now,
+            base_lang=req.base_lang,
+            volume=req.volume,
+        )
     if isinstance(req, wire.IdleRequest):
         return SetIdle(req.timeout)
     if isinstance(req, wire.SubscribeRequest):

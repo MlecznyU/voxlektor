@@ -12,6 +12,7 @@ _UNITS = {"s": 1, "m": 60, "h": 3600}
 _LANGS: tuple[LangPref, ...] = ("auto", "pl", "en")
 _RATE_MIN = 0.5
 _RATE_MAX = 3.0
+_VOLUME_MAX = 100
 _DEFAULT_ENGINE = EngineId("omnivoice")
 _DEFAULT_VOICE = VoiceName("v0-default")
 
@@ -23,6 +24,7 @@ class Settings:
     lang: LangPref = "auto"
     base_lang: Lang = "pl"
     rate: float = 1.0
+    volume: int = 50
     idle_timeout_s: int = 600
     autostart: bool = True
     history: int = 20
@@ -57,6 +59,12 @@ def _rate(value: object) -> float:
     if not _RATE_MIN <= value <= _RATE_MAX:
         raise InvalidSetting(f"rate must be between {_RATE_MIN} and {_RATE_MAX}")
     return float(value)
+
+
+def _volume(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= _VOLUME_MAX:
+        raise InvalidSetting(f"volume must be an integer between 0 and {_VOLUME_MAX}")
+    return value
 
 
 def _lang(value: object) -> LangPref:
@@ -98,7 +106,7 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
     base = Settings()
     engine, voice, lang = base.engine, base.voice, base.lang
     base_lang = base.base_lang
-    rate, idle_timeout_s = base.rate, base.idle_timeout_s
+    rate, volume, idle_timeout_s = base.rate, base.volume, base.idle_timeout_s
     autostart, history = base.autostart, base.history
     for key, value in merged.items():
         match key:
@@ -112,6 +120,8 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
                 base_lang = _base_lang(value)
             case "rate":
                 rate = _rate(value)
+            case "volume":
+                volume = _volume(value)
             case "history":
                 history = _positive_int(key, value)
             case "idle_timeout":
@@ -126,6 +136,7 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
         lang=lang,
         base_lang=base_lang,
         rate=rate,
+        volume=volume,
         idle_timeout_s=idle_timeout_s,
         autostart=autostart,
         history=history,

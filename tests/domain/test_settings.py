@@ -48,6 +48,7 @@ def test_all_keys_are_applied() -> None:
             "lang": "pl",
             "base_lang": "en",
             "rate": 2,
+            "volume": 80,
             "history": 5,
             "idle_timeout": "1h",
             "autostart": False,
@@ -59,10 +60,29 @@ def test_all_keys_are_applied() -> None:
         lang="pl",
         base_lang="en",
         rate=2.0,
+        volume=80,
         history=5,
         idle_timeout_s=3600,
         autostart=False,
     )
+
+
+def test_volume_default_is_50() -> None:
+    assert merge_layers().volume == 50
+    assert Settings().volume == 50
+
+
+def test_volume_bounds() -> None:
+    assert merge_layers({"volume": 0}).volume == 0
+    assert merge_layers({"volume": 100}).volume == 100
+    assert merge_layers({"volume": 70}, {"volume": 30}).volume == 30
+
+
+@pytest.mark.parametrize("value", [-1, 101, 50.5, True, "50", None])
+def test_volume_rejects(value: object) -> None:
+    with pytest.raises(InvalidSetting) as info:
+        merge_layers({"volume": value})
+    assert info.value.message == "volume must be an integer between 0 and 100"
 
 
 def test_idle_timeout_accepts_seconds_int() -> None:

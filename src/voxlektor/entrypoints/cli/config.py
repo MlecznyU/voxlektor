@@ -32,6 +32,7 @@ def show() -> int:
         "lang": s.lang,
         "base_lang": s.base_lang,
         "rate": s.rate,
+        "volume": s.volume,
         "history": s.history,
         "service": {"idle_timeout": _toml_duration(s.idle_timeout_s), "autostart": s.autostart},
     }

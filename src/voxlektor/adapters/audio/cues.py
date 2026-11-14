@@ -5,6 +5,11 @@ mixes it with the reading playback and it sounds even while the reading is pause
 generated soft tone; STOPPED is the bundled clip ``bundled_cues/stopped_en.wav`` (made once by
 ``scripts/make_cues.py``). Failures are logged and never raised into the loop.
 
+Loudness: every cue is normalised once at load to the speech target (``dsp.level`` at volume 50);
+at play it goes through ``dsp.level`` at the reading's volume (gain + the same limiter) and then
+6 dB down, so cues sit 6 dB under speech (-26 dBFS at volume 50) and never above -7 dBFS. Volume 0
+plays nothing. The prepared samples of the last volume are kept per cue.
+
 Threads: ``play``/``close`` run on the loop thread; the stream callback (PortAudio thread) only
 reads its own buffer. The stream of the last cue stays open until the next cue or ``close()``
 (PortAudio forbids closing a stream from its own callback), or until ``portaudio.refresh_devices``
@@ -24,6 +29,7 @@ import sounddevice as sd
 import soundfile as sf
 
 from voxlektor.adapters.audio import portaudio
+from voxlektor.adapters.audio.dsp import level
 from voxlektor.app.effects import Cue
 
 _log = logging.getLogger(__name__)
@@ -34,6 +40,7 @@ _TONE_RATE = 24000
 _TONE_HZ = 660.0
 _TONE_SECONDS = 0.12
 _TONE_PEAK = 0.12
+_CUE_UNDER_SPEECH = 10.0 ** (-6.0 / 20.0)  # cues sit 6 dB under speech at every volume
 
 type _Samples = npt.NDArray[np.float32]
 type _Sound = tuple[_Samples, int]
@@ -45,6 +52,9 @@ class SoundDeviceCuePlayer:
         clip = _load_clip(_STOPPED_CLIP)
         if clip is not None:
             self._sounds[Cue.STOPPED] = clip
+        # Normalised once, at load, to the speech target (volume 50).
+        self._sounds = {c: (level(s, rate, 50), rate) for c, (s, rate) in self._sounds.items()}
+        self._ready: dict[Cue, tuple[int, _Sound]] = {}  # the last volume asked for, per cue
         self._stream: sd.OutputStream | None = None
         portaudio.register(self)
 
@@ -55,9 +65,9 @@ class SoundDeviceCuePlayer:
         self.close()
         return True
 
-    def play(self, cue: Cue) -> None:
+    def play(self, cue: Cue, volume: int = 50) -> None:
         try:
-            self._play(cue)
+            self._play(cue, volume)
         except Exception:
             _log.exception("cue %s failed", cue)
 
@@ -71,8 +81,23 @@ class SoundDeviceCuePlayer:
         except Exception:
             _log.exception("closing the cue stream failed")
 
-    def _play(self, cue: Cue) -> None:
+    def _prepared(self, cue: Cue, volume: int) -> _Sound | None:
+        """The cue at ``volume``: ``level`` (gain + limiter), then 6 dB under speech; cached."""
+        cached = self._ready.get(cue)
+        if cached is not None and cached[0] == volume:
+            return cached[1]
         sound = self._sounds.get(cue)
+        if sound is None:
+            return None
+        samples, rate = sound
+        leveled = (level(samples, rate, volume) * _CUE_UNDER_SPEECH).astype(np.float32)
+        self._ready[cue] = (volume, (leveled, rate))
+        return leveled, rate
+
+    def _play(self, cue: Cue, volume: int) -> None:
+        if volume == 0:
+            return  # silence: no stream at all
+        sound = self._prepared(cue, volume)
         if sound is None:
             _log.warning("no sound for cue %s", cue)
             return

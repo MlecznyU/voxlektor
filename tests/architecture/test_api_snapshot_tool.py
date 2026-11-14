@@ -160,6 +160,23 @@ def test_imported_names_are_not_recorded_as_aliases(tmp_path: Path) -> None:
     assert _snapshot_lines(tmp_path) == ["fakeapi:Home: TypeAlias = pathlib.Path"]
 
 
+def test_module_values_of_foreign_classes_are_recorded_with_their_repr(tmp_path: Path) -> None:
+    """A frozen value such as ``omnivoice_model.MODEL`` (a ``contracts.engine.ModelInfo``)."""
+    source = (
+        "from dataclasses import dataclass\n"
+        "from fractions import Fraction\n"
+        "from pathlib import PurePosixPath\n\n"
+        "HALF = Fraction(1, 2)\n"
+        "ROOT = PurePosixPath('/srv')\n"
+        "_PRIVATE = Fraction(1, 3)\n"
+    )
+    _set_module(tmp_path, source)
+    assert _snapshot_lines(tmp_path) == [
+        "fakeapi:HALF = Fraction(1, 2)",
+        "fakeapi:ROOT = PurePosixPath('/srv')",
+    ]
+
+
 def test_unreadable_signature_fails_loudly(tmp_path: Path) -> None:
     _set_module(tmp_path, "class Table(dict[str, int]):\n    pass\n")
     result = _run(tmp_path, "--approve")

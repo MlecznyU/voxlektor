@@ -47,13 +47,20 @@ class Tty(io.StringIO):
 
 
 @pytest.fixture
-def home(short_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def fresh_home(short_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A clean ``VOXLEKTOR_HOME`` where setup has never run (speaking is gated)."""
     for name in list(os.environ):
         if name.startswith("VOXLEKTOR_"):
             monkeypatch.delenv(name)
     monkeypatch.setenv("VOXLEKTOR_HOME", str(short_tmp))
     monkeypatch.setattr(sys, "stdin", Tty())
     return short_tmp
+
+
+@pytest.fixture
+def home(fresh_home: Path, setup_completed: Path) -> Path:
+    """A clean ``VOXLEKTOR_HOME`` whose setup has completed."""
+    return fresh_home
 
 
 @pytest.fixture

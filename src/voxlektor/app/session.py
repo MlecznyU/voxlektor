@@ -21,7 +21,9 @@ once per engine load and reading with a fresh prompt (``PrepareVoice(fresh)``); 
 failure that no live chunk needs is dropped silently;
 a generation failure is retried once as is, then once after an engine reload; the next failure
 stops the reading. Every retry plays ``Cue.RETRY``; a reading stopped by an error (also a
-playback or load failure) plays ``Cue.STOPPED`` and records ``last_error``.
+playback or load failure) plays ``Cue.STOPPED`` and records ``last_error``. A generation retry
+cue plays at the volume of the failed chunk; every other cue at the volume of the latest accepted
+``Speak`` (``_cue_volume``; ``settings.volume`` before the first one).
 
 Metrics (``chunks``, ``gen_seconds``, ``audio_seconds``) count each chunk of the latest reading
 once, at its first successful generation; regenerations after Back or a retry are not counted.
@@ -89,6 +91,8 @@ _CAPS = (
 )
 _RATE_MIN = 0.5  # the same bounds as the ``rate`` setting
 _RATE_MAX = 3.0
+_VOLUME_MIN = 0  # the same bounds as the ``volume`` setting
+_VOLUME_MAX = 100
 _RELOAD_ON_FAILURE = 2  # the generation failure that reloads the engine before retrying
 _STOP_ON_FAILURE = 3  # the generation failure that stops the reading
 
@@ -144,6 +148,7 @@ class Session:
         self._prompt_failures: dict[str, int] = {}  # per voice; reset per reading and per load
         self._metrics = _Metrics(started_at=clock.now())
         self._last_error: str | None = None
+        self._cue_volume = settings.volume  # the volume of the latest accepted Speak
 
     # ------------------------------------------------------------ commands
 
@@ -189,16 +194,21 @@ class Session:
         if not _RATE_MIN <= rate <= _RATE_MAX:
             message = f"rate must be between {_RATE_MIN} and {_RATE_MAX}"
             return Reply(ok=False, data={}, error=InvalidSetting(message))
+        volume = cmd.volume if cmd.volume is not None else self._settings.volume
+        if not _VOLUME_MIN <= volume <= _VOLUME_MAX:
+            message = f"volume must be between {_VOLUME_MIN} and {_VOLUME_MAX}"
+            return Reply(ok=False, data={}, error=InvalidSetting(message))
         lang = cmd.lang if cmd.lang is not None else self._settings.lang
         epoch = Epoch(self._epoch + 1) if cmd.now else self._epoch
         base_lang = cmd.base_lang or self._settings.base_lang
-        plan = plan_reading(cmd.text, lang, base_lang, rate, epoch, self._next_id)
+        plan = plan_reading(cmd.text, lang, base_lang, rate, epoch, self._next_id, volume=volume)
         if not plan:
             return _ok(chunks=0)
         if cmd.now:
             self._stop_reading(out)  # bumps the epoch to the one the plan was made with
         if not self._active():
             self._reset_reading()
+        self._cue_volume = volume
         self._refs[voice] = ref
         self._next_id += len(plan)
         for chunk in plan:
@@ -326,7 +336,7 @@ class Session:
         failures = self._prompt_failures.get(voice, 0) + 1
         self._prompt_failures[voice] = failures
         if failures == 1:
-            out.append(PlayCue(Cue.RETRY))
+            out.append(PlayCue(Cue.RETRY, self._cue_volume))
             out.append(PrepareVoice(self._refs[voice], fresh=True))
             self._settle(out)
         else:
@@ -363,7 +373,7 @@ class Session:
             return out
         self._gen_failures[chunk] = failures
         self._ahead[chunk] = _Gen.RETRY
-        out.append(PlayCue(Cue.RETRY))
+        out.append(PlayCue(Cue.RETRY, self._items[chunk].chunk.volume))
         if failures == _RELOAD_ON_FAILURE and self._kw.life is kw.Life.WARM:
             self._feed(kw.UnloadRequested(), out)  # a reload already under way is enough
             self._feed(kw.NeedEngine(), out)
@@ -426,7 +436,7 @@ class Session:
         stopped = self._active()
         self._stop_reading(out)
         if stopped:
-            out.append(PlayCue(Cue.STOPPED))
+            out.append(PlayCue(Cue.STOPPED, self._cue_volume))
         self._settle(out)
 
     def _stop_reading(self, out: list[Effect]) -> None:

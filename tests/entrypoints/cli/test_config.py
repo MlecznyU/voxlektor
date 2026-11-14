@@ -29,12 +29,13 @@ def test_config_voice_persists(
 def test_config_voice_unknown_lists_names_and_writes_nothing(
     wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    before = _config(home).read_text()  # the completed-setup config of the `home` fixture
     assert main(["config", "voice", "nobody"]) == 1
     err = capsys.readouterr().err
     assert "unknown voice 'nobody'" in err
     assert "available: f1-warm, f2-narrator" in err
     assert "v0-default" in err
-    assert not _config(home).exists()
+    assert _config(home).read_text() == before
 
 
 def test_config_show_prints_the_effective_settings(
@@ -53,6 +54,7 @@ def test_config_show_prints_the_effective_settings(
         'lang = "auto"',
         'base_lang = "en"',
         "rate = 1.0",
+        "volume = 50",
         "history = 20",
         "",
         "[service]",
@@ -65,6 +67,16 @@ def test_config_show_prints_the_effective_settings(
     monkeypatch.delenv("VOXLEKTOR_BASE_LANG")
     assert main(["config", "show"]) == 0
     assert capsys.readouterr().out == out
+
+
+def test_config_show_includes_volume(
+    wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert main(["config", "show"]) == 0
+    assert "volume = 50" in capsys.readouterr().out.splitlines()
+    monkeypatch.setenv("VOXLEKTOR_VOLUME", "80")
+    assert main(["config", "show"]) == 0
+    assert "volume = 80" in capsys.readouterr().out.splitlines()
 
 
 @pytest.mark.parametrize(

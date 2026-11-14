@@ -27,6 +27,7 @@ from voxlektor.app.effects import (
     Generate,
     LoadEngine,
     PausePlayback,
+    PlayCue,
     PrepareVoice,
     ResumePlayback,
     ScheduleWake,
@@ -94,12 +95,13 @@ def _sim(
 
 
 def _sentence(tag: str) -> str:
-    """About 210 characters: two of them never share a chunk."""
-    return f"{tag} {'word ' * 40}end."
+    """About 100 characters: under the first-chunk cap and above the merge threshold."""
+    return f"{tag} {'word ' * 18}end."
 
 
 def _text(*tags: str) -> str:
-    return " ".join(_sentence(tag) for tag in tags)
+    """One paragraph per tag, so every sentence is a chunk of its own."""
+    return "\n\n".join(_sentence(tag) for tag in tags)
 
 
 def _speak(
@@ -608,6 +610,75 @@ def test_speak_rejects_rate_out_of_range() -> None:
     assert sim.effects == []
     assert sim.handle(_speak(_text("a"), rate=0.5)).ok
     assert sim.handle(_speak(_text("b"), rate=3.0)).ok
+
+
+def test_speak_volume_reaches_every_generated_chunk() -> None:
+    sim = _sim()
+    sim.handle(Speak(_text("a", "b"), None, "en", None, False, volume=80))
+    volumes = [g.chunk.volume for g in _of(sim, Generate)]
+    assert volumes == [80, 80]
+
+
+@pytest.mark.parametrize(("volume", "expected"), [(None, 35), (0, 0), (100, 100)])
+def test_speak_volume_falls_back_to_settings(volume: int | None, expected: int) -> None:
+    sim = _sim(Settings(engine=EngineId("fake"), volume=35))
+    sim.handle(Speak(_text("a"), None, "en", None, False, volume=volume))
+    assert [g.chunk.volume for g in _of(sim, Generate)] == [expected]
+
+
+@pytest.mark.parametrize("volume", [-1, 101])
+def test_speak_rejects_volume_out_of_range(volume: int) -> None:
+    sim = _sim()
+    reply = sim.handle(Speak(_text("a"), None, "en", None, False, volume=volume))
+    assert not reply.ok
+    assert reply.error is not None
+    assert reply.error.code == "invalid_setting"
+    assert reply.error.message == "volume must be between 0 and 100"
+    assert sim.effects == []
+
+
+def test_generation_retry_cue_plays_at_the_volume_of_the_failed_chunk() -> None:
+    engine = FakeEngine(sample_rate=100, fail_on="BOOM", fail_times=1)
+    sim = _sim(auto_complete=False, engine=engine)
+    sim.handle(Speak(_text("a", "b", "BOOM"), None, "en", None, False, volume=30))
+    sim.handle(Speak(_text("c"), None, "en", None, False, volume=80))
+    sim.complete()  # a played: BOOM is generated, fails once and is retried
+    assert _of(sim, PlayCue) == [PlayCue(Cue.RETRY, volume=30)]
+
+
+def test_stopped_cue_plays_at_the_volume_of_the_latest_speak() -> None:
+    sim = _sim(auto_complete=False)
+    sim.handle(Speak(_text("a"), None, "en", None, False, volume=30))
+    sim.handle(Speak(_text("b"), None, "en", None, False, volume=80))
+    sim.fail_playback("device gone")
+    assert _of(sim, PlayCue) == [PlayCue(Cue.STOPPED, volume=80)]
+
+
+def test_prompt_retry_cue_plays_at_the_volume_of_the_latest_speak() -> None:
+    sim = _sim(engine=FakeEngine(sample_rate=100, fail_prepare=1))
+    sim.handle(Speak(_text("a"), None, "en", None, False, volume=40))
+    assert _of(sim, PlayCue) == [PlayCue(Cue.RETRY, volume=40)]
+
+
+def test_cue_volume_defaults_to_the_volume_setting() -> None:
+    settings = Settings(engine=EngineId("fake"), volume=65)
+    sim = _sim(settings, engine=FakeEngine(sample_rate=100, fail_on="BOOM"))
+    sim.handle(_speak(_text("BOOM")))
+    assert _of(sim, PlayCue) == [
+        PlayCue(Cue.RETRY, volume=65),
+        PlayCue(Cue.RETRY, volume=65),
+        PlayCue(Cue.STOPPED, volume=65),
+    ]
+    assert sim.cues == [Cue.RETRY, Cue.RETRY, Cue.STOPPED]
+
+
+def test_rejected_speak_does_not_change_the_cue_volume() -> None:
+    sim = _sim(auto_complete=False)
+    sim.handle(Speak(_text("a"), None, "en", None, False, volume=30))
+    sim.handle(Speak(_text("b"), None, "en", 9.0, False, volume=90))  # rejected: rate
+    sim.handle(Speak("   ", None, "en", None, False, volume=70))  # nothing to read
+    sim.fail_playback("device gone")
+    assert _of(sim, PlayCue) == [PlayCue(Cue.STOPPED, volume=30)]
 
 
 def test_replies_do_not_share_data() -> None:

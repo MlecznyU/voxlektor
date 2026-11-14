@@ -36,6 +36,26 @@ class EngineSpec:
 
 
 @dataclass(frozen=True)
+class ModelInfo:
+    """The model an engine needs, described without importing the engine (setup reads it).
+
+    Published under the ``voxlektor.engine_models`` entry-point group by a light module next
+    to the engine. ``repo == ""`` means the engine needs no download; ``hidden`` engines (test
+    engines) are left out of the setup menu but may still be chosen by flag.
+    """
+
+    engine_id: str
+    title: str
+    repo: str
+    revision: str
+    size_bytes: int
+    license_name: str
+    license_url: str
+    commercial_use: bool
+    hidden: bool = False
+
+
+@dataclass(frozen=True)
 class VoiceRef:
     """A voice on disk: its name, reference audio and the transcript of that audio."""
 

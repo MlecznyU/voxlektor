@@ -75,8 +75,66 @@ def test_memory_player_records_cues_in_order() -> None:
     player = MemoryCuePlayer()
     port: CuePlayer = player
     port.play(Cue.RETRY)
-    port.play(Cue.STOPPED)
+    port.play(Cue.STOPPED, 80)
     assert player.played == [Cue.RETRY, Cue.STOPPED]
+    assert player.calls == [(Cue.RETRY, 50), (Cue.STOPPED, 80)]
+
+
+def _played(cue: Cue, volume: int) -> npt.NDArray[np.float32]:
+    """The samples ``SoundDeviceCuePlayer`` sends for ``cue`` at ``volume``."""
+    player = SoundDeviceCuePlayer()
+    player.play(cue, volume)
+    return FakeStream.instances[-1].drain()
+
+
+def _gated_rms_dbfs(audio: npt.NDArray[np.float32], rate: int = 24000) -> float:
+    """RMS of the 20 ms frames above -50 dBFS, as dsp measures speech."""
+    frame = rate // 50
+    count = len(audio) // frame
+    power = np.mean(np.square(audio[: count * frame].astype(np.float64)).reshape(count, frame), 1)
+    return float(10.0 * np.log10(np.mean(power[power > 1e-5])))
+
+
+@pytest.mark.parametrize("cue", [Cue.RETRY, Cue.STOPPED])
+def test_cues_sit_6_db_under_speech_at_volume_50(cue: Cue) -> None:
+    assert _gated_rms_dbfs(_played(cue, 50)) == pytest.approx(-26.0, abs=1.0)
+
+
+def test_cues_follow_the_volume() -> None:
+    half = _played(Cue.RETRY, 50)
+    quarter = _played(Cue.RETRY, 25)
+    loud = _played(Cue.RETRY, 100)
+    ratio = float(np.max(np.abs(quarter)) / np.max(np.abs(half)))
+    assert ratio == pytest.approx(0.25, rel=0.02)  # -12 dB
+    assert float(np.max(np.abs(loud))) > float(np.max(np.abs(half)))
+    stopped_loud = _played(Cue.STOPPED, 100)
+    ceiling = 0.891 * 10.0 ** (-6.0 / 20.0)  # limited to -1 dBFS, then 6 dB under: -7 dBFS
+    assert float(np.max(np.abs(stopped_loud))) <= ceiling
+
+
+def test_a_cue_at_volume_0_opens_no_stream() -> None:
+    player = SoundDeviceCuePlayer()
+    player.play(Cue.RETRY, 0)
+    assert FakeStream.instances == []
+
+
+def test_a_cue_at_the_same_volume_is_prepared_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    player = SoundDeviceCuePlayer()
+    calls: list[int] = []
+    real = cues.level
+
+    def counting(
+        samples: npt.NDArray[np.float32], rate: int, volume: int
+    ) -> npt.NDArray[np.float32]:
+        calls.append(volume)
+        return real(samples, rate, volume)
+
+    monkeypatch.setattr(cues, "level", counting)
+    player.play(Cue.RETRY, 70)
+    player.play(Cue.RETRY, 70)
+    player.play(Cue.RETRY, 30)
+    assert calls == [70, 30]
+    assert len(FakeStream.instances) == 3
 
 
 def test_retry_is_a_short_soft_tone() -> None:

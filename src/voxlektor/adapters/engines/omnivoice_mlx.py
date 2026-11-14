@@ -18,10 +18,9 @@ from huggingface_hub.errors import LocalEntryNotFoundError
 from mlx_audio.tts.models.omnivoice.utils import create_voice_clone_prompt
 from mlx_audio.tts.utils import load_model
 
+from voxlektor.adapters.engines.omnivoice_model import OMNIVOICE_REVISION, REPO
 from voxlektor.contracts.engine import AudioChunk, Capability, EngineSpec, VoicePrompt, VoiceRef
 
-REPO = "mlx-community/OmniVoice-bf16"
-OMNIVOICE_REVISION = "8fb0b754cad788aaefec690cd55c207e8a628f85"
 NUM_STEPS = 16
 LANGS = {"pl": "polish", "en": "english"}
 PROMPT_FORMAT = 1

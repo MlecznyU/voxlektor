@@ -13,6 +13,8 @@ Writes one sorted line per public symbol of the frozen modules to
 * ``module:Name: TypeAlias = body`` for ``type X = ...`` aliases and plain aliases
   (``X = A | B``, ``X = Literal[...]``, ``X = float``) assigned in the module itself
 * ``module:Name.MEMBER = value`` for enum members
+* ``module:NAME = repr`` for module-level values assigned in the module itself (also when the
+  value's class lives elsewhere, e.g. a ``contracts.engine.ModelInfo`` constant)
 * ``cli:command --option (default)`` for the typer command tree
 
 A signature that cannot be read is an error (the snapshot never records a ``(...)`` placeholder).
@@ -85,6 +87,9 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.bootstrap.client",
     "voxlektor.entrypoints.cli.app",
     "voxlektor.entrypoints.oneshot",
+    "voxlektor.adapters.engines.omnivoice_model",
+    "voxlektor.adapters.models.hf_cache",
+    "voxlektor.app.setup",
 )
 # Typer applications as "module:attribute", extended by the CLI task.
 FROZEN_CLI: tuple[str, ...] = ("voxlektor.entrypoints.cli.app:app",)
@@ -128,6 +133,11 @@ def _is_alias(value: Any) -> bool:
     )
 
 
+def _is_value(value: Any) -> bool:
+    """A plain module-level value (a constant such as a frozen ``ModelInfo``), not code."""
+    return not (callable(value) or inspect.ismodule(value))
+
+
 def _assigned_names(module: Any) -> set[str]:
     """Names bound by a top-level assignment in the module's own source (not by an import)."""
     try:
@@ -157,7 +167,8 @@ def _public_names(module: Any) -> list[str]:
         and not inspect.ismodule(value)
         and (
             getattr(value, "__module__", module.__name__) == module.__name__
-            or (name in assigned and _is_alias(value))
+            # assigned here, though its class lives elsewhere: an alias or a frozen value
+            or (name in assigned and (_is_alias(value) or _is_value(value)))
         )
     )
 

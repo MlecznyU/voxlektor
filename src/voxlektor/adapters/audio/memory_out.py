@@ -11,13 +11,15 @@ from voxlektor.domain.types import ChunkId
 
 
 class MemoryCuePlayer:
-    """Records the cues it is asked to play."""
+    """Records the cues it is asked to play (``played``) and their volumes (``calls``)."""
 
     def __init__(self) -> None:
         self.played: list[Cue] = []
+        self.calls: list[tuple[Cue, int]] = []
 
-    def play(self, cue: Cue) -> None:
+    def play(self, cue: Cue, volume: int = 50) -> None:
         self.played.append(cue)
+        self.calls.append((cue, volume))
 
 
 class MemoryOutput:

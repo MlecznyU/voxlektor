@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tests.fixtures.sockets import TIMEOUT, request, wait_for_file
@@ -31,8 +32,10 @@ class _SignalOutput(MemoryOutput):
     def __init__(self) -> None:
         super().__init__(auto_complete=True)
         self.first_start = threading.Event()
+        self.samples: list[object] = []
 
     def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
+        self.samples.append(samples)
         self.first_start.set()
         super().start(chunk, samples, sample_rate)
 
@@ -119,6 +122,22 @@ def test_speak_then_status_warm_then_shutdown_removes_socket_and_pid(daemon: _Ru
     assert not daemon.thread.is_alive()
     assert not daemon.socket.exists()
     assert not daemon.pid.exists()
+
+
+@pytest.mark.parametrize(("volume", "silent"), [(0, True), (50, False)])
+def test_the_daemon_levels_every_chunk_at_its_volume(
+    daemon: _Running, volume: int, silent: bool
+) -> None:
+    """Wiring: the engine thread runs ``dsp.level`` with the request's volume."""
+    speak = _line("speak", text="Hello there, this is a test.", lang="en", volume=volume)
+    assert request(daemon.socket, speak).ok
+    assert daemon.output.first_start.wait(TIMEOUT)
+    (raw,) = daemon.output.samples
+    samples = np.asarray(raw, dtype=np.float32)
+    assert len(samples) > 0
+    peak = float(np.max(np.abs(samples)))
+    assert (peak == 0.0) is silent
+    assert peak <= 0.891
 
 
 def test_protocol_errors_come_back_as_error_replies(daemon: _Running) -> None:

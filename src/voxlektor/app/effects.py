@@ -109,7 +109,10 @@ class Cue(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PlayCue:
+    """Play ``cue`` at ``volume`` (0..100, 50 = the even level; the reading it belongs to)."""
+
     cue: Cue
+    volume: int = 50
 
 
 type Effect = (

@@ -103,6 +103,19 @@ def test_speak_defaults() -> None:
     assert (req.voice, req.lang, req.rate, req.now) == (None, None, None, False)
 
 
+def test_speak_volume_decodes() -> None:
+    req = decode_request(b'{"v":1,"id":"1","cmd":"speak","text":"x","volume":70}')
+    assert isinstance(req, SpeakRequest)
+    assert req.volume == 70
+    assert SpeakRequest(v=1, id="1", text="x").volume is None
+
+
+@pytest.mark.parametrize("volume", [b"101", b"-1", b"50.5", b'"50"', b"true"])
+def test_speak_volume_out_of_range_is_invalid_argument(volume: bytes) -> None:
+    err = _fail(b'{"v":1,"id":"1","cmd":"speak","text":"x","volume":%s}' % volume)
+    assert err.code is ErrorCode.invalid_argument
+
+
 def test_reply_with_error_decodes() -> None:
     rep = decode_reply(b'{"v":1,"id":null,"ok":false,"error":{"code":"bad_frame","message":"m"}}')
     assert rep == Reply(v=1, id=None, ok=False, error=ReplyError(ErrorCode.bad_frame, "m"))

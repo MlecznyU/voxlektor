@@ -148,6 +148,54 @@ def test_generate_joins_pieces_and_stretches_by_the_chunk_rate(
     assert stretch.rates == [1.0, 2.0]
 
 
+class _Level:
+    """Records ``(sample_rate, volume)`` and the input length; returns a constant signal."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int, int]] = []
+        self.threads: set[int] = set()
+
+    def __call__(self, samples: Samples, sample_rate: int, volume: int) -> Samples:
+        self.calls.append((sample_rate, volume, len(samples)))
+        self.threads.add(threading.get_ident())
+        return np.full(len(samples), 0.25, dtype=np.float32)
+
+
+def test_worker_applies_level_after_stretch(
+    provider: _Provider, repo: InMemoryVoiceRepository
+) -> None:
+    level = _Level()
+    worker = EngineWorker(provider, repo, _Stretch(), level=level)
+    rec = _Recorder()
+    text = "x" * 30
+    chunk = Chunk(ChunkId(0), text, "en", 2.0, Epoch(0), 70)
+    try:
+        for label, job in [("load", LOAD), ("prepare", PREPARE), ("gen", Generate(chunk, "v1"))]:
+            rec.submit(worker, label, job)
+        *_, (_, ident, result) = rec.take(3)
+    finally:
+        worker.close()
+    assert isinstance(result, tuple)
+    audio, _ = result
+    assert level.calls == [(24000, 70, 18000)]  # after the stretch halved 36000 samples
+    assert level.threads == {ident}
+    assert audio.sample_rate == 24000
+    assert np.all(audio.samples == 0.25)
+
+
+def test_worker_without_level_keeps_the_stretched_samples(
+    worker: EngineWorker,
+) -> None:
+    rec = _Recorder()
+    chunk = Chunk(ChunkId(0), "x" * 30, "en", 1.0, Epoch(0), 0)
+    for label, job in [("load", LOAD), ("prepare", PREPARE), ("gen", Generate(chunk, "v1"))]:
+        rec.submit(worker, label, job)
+    *_, (_, _, result) = rec.take(3)
+    assert isinstance(result, tuple)
+    assert len(result[0].samples) == 36000
+    assert result[0].samples.any()
+
+
 class _GatedEngine(FakeEngine):
     """Blocks the first synthesis until ``gate`` is set; ``entered`` says it started."""
 

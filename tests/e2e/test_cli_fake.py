@@ -83,7 +83,7 @@ def _stop_all(home: Path) -> None:
 
 
 @pytest.fixture
-def vxl(short_tmp: Path) -> Iterator[_Cli]:
+def vxl(short_tmp: Path, setup_completed: Path) -> Iterator[_Cli]:
     env = {name: value for name, value in os.environ.items() if not name.startswith("VOXLEKTOR_")}
     env |= {
         "VOXLEKTOR_HOME": str(short_tmp),
@@ -147,6 +147,24 @@ def test_empty_input_never_starts_a_daemon(vxl: _Cli) -> None:
     assert not vxl.socket_path.exists()
     assert not vxl.pid_path.exists()
     assert _serve_pids(vxl.home) == []
+
+
+def test_setup_gate_then_flag_mode_setup_then_speaking(vxl: _Cli) -> None:
+    """A home that was never set up: speaking is refused until `vxl setup --yes` ran."""
+    (vxl.home / "config" / "config.toml").write_text("config_version = 1\n")
+    refused = vxl("test")
+    assert refused.returncode == 1
+    assert "voxlektor is not set up yet; run: vxl setup" in refused.stderr
+    no_tty = vxl("setup")
+    assert no_tty.returncode == 1
+    assert "vxl setup --yes" in no_tty.stderr
+    done = vxl("setup", "--yes", "--engine", "fake", "--volume", "40")
+    assert done.returncode == 0, done.stderr
+    assert "volume = 40" in done.stdout
+    assert not vxl.pid_path.exists()  # flag mode starts no daemon
+    spoken = vxl("test")
+    assert spoken.returncode == 0, spoken.stderr
+    assert vxl("stop").returncode == 0
 
 
 def test_control_without_daemon_exits_2_and_stop_is_quiet(vxl: _Cli) -> None:

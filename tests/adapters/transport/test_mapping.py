@@ -48,6 +48,10 @@ from voxlektor.testing.simulator import Simulator
             wire.SpeakRequest(v=1, id="1", text="hi", base_lang="en"),
             Speak("hi", None, None, None, False, base_lang="en"),
         ),
+        (
+            wire.SpeakRequest(v=1, id="1", text="hi", volume=70),
+            Speak("hi", None, None, None, False, volume=70),
+        ),
         (wire.PauseRequest(v=1, id="1"), Pause()),
         (wire.ResumeRequest(v=1, id="1"), Resume()),
         (wire.SkipRequest(v=1, id="1"), Skip()),

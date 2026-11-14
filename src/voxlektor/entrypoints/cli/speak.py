@@ -4,10 +4,14 @@ The text is the arguments joined with spaces, or the file given with ``-f`` (a r
 stdin when it is not a terminal. Files and stdin are read bounded: more than ``MAX_FRAME`` bytes
 is ``text too long`` (exit 1) before any client is built or daemon started. Text that
 ``split_text`` turns into nothing prints ``nothing to read`` and exits 0 without touching the
-socket. Every request carries the effective voice, language, base language and rate (flag > env >
-config > defaults), so a changed config or ``VOXLEKTOR_*`` value applies to the next reading
+socket. Every request carries the effective voice, language, base language, rate and volume (flag >
+env > config > defaults), so a changed config or ``VOXLEKTOR_*`` value applies to the next reading
 without restarting the daemon. With ``service.autostart = false`` the text is read in this process
 (``entrypoints.oneshot``, imported only on that path because it loads the engine stack).
+
+Speaking is gated on setup: until ``vxl setup`` has completed (the store's marker), any text,
+from any source and also in one-shot mode, exits 1 with ``voxlektor is not set up yet; run: vxl
+setup``. The gate is in the CLI only; the daemon and the protocol do not check it.
 """
 
 import stat
@@ -19,6 +23,7 @@ import typer
 
 from voxlektor.bootstrap.client import build_client
 from voxlektor.contracts.protocol import MAX_FRAME
+from voxlektor.domain.errors import DomainError
 from voxlektor.domain.text.chunking import split_text
 from voxlektor.entrypoints.cli.output import EXIT_OK, NOTHING_TO_READ
 
@@ -38,13 +43,18 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
     file: Annotated[
         Path | None, typer.Option("-f", metavar="FILE", help="Read the text from FILE.")
     ] = None,
+    volume: Annotated[
+        int | None, typer.Option("--volume", help="Volume, 0 to 100; 50 = even level.")
+    ] = None,
 ) -> int:
     """Read text aloud (the default command)."""
     content = _resolve_text(text or [], file)
     if not split_text(content):
         print(NOTHING_TO_READ)
         return EXIT_OK
-    ctx = build_client({"voice": voice, "lang": lang, "rate": rate})
+    ctx = build_client({"voice": voice, "lang": lang, "rate": rate, "volume": volume})
+    if not ctx.store.setup_completed():
+        raise DomainError("not_set_up", "voxlektor is not set up yet; run: vxl setup")
     if not ctx.settings.autostart:
         from voxlektor.entrypoints import oneshot  # noqa: PLC0415  # heavy: engine stack
 
@@ -59,6 +69,7 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
         base_lang=settings.base_lang,
         rate=settings.rate,
         now=now,
+        volume=settings.volume,
     )
     return EXIT_OK
 

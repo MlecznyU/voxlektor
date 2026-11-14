@@ -1,10 +1,21 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from voxlektor.app.ports import Option
 from voxlektor.contracts.engine import VoiceRef
-from voxlektor.domain.errors import UnknownVoice
-from voxlektor.testing.fakes import FakeEngine, InMemoryVoiceRepository
+from voxlektor.domain.errors import ServiceUnavailable, UnknownVoice
+from voxlektor.testing.fakes import (
+    ENTER,
+    FAKE_MODEL,
+    FakeEngine,
+    FakeModelStore,
+    FakeSamplePlayer,
+    InMemorySettingsStore,
+    InMemoryVoiceRepository,
+    ScriptedPrompter,
+)
 
 A = VoiceRef("a", Path("/v/a/ref.wav"), "text a")
 B = VoiceRef("b", Path("/v/b/ref.wav"), "text b")
@@ -76,3 +87,76 @@ def test_fail_prepare_fails_the_first_prepares() -> None:
         engine.prepare_voice(A)
     assert engine.prepare_voice(A).voice == "a"
     assert engine.prepare_calls == 1
+
+
+def test_scripted_prompter_answers_in_order_then_presses_enter() -> None:
+    prompter = ScriptedPrompter(["b", 2, True, ENTER])
+    options = [Option("a", "A"), Option("b", "B")]
+    assert prompter.choose("pick", options, "a") == "b"
+    assert prompter.number("n", 0, 10, 5) == 2.0
+    assert prompter.confirm("ok?", default=False) is True
+    assert prompter.confirm("again?", default=False) is False  # ENTER
+    assert prompter.choose("pick", options, "a") == "a"  # script exhausted
+    prompter.say("hello")
+    assert prompter.said == ["hello"]
+    assert prompter.options == [options, options]
+    assert [kind for kind, _, _ in prompter.asked] == [
+        "choose",
+        "number",
+        "confirm",
+        "confirm",
+        "choose",
+    ]
+    assert repr(ENTER) == "ENTER"
+
+
+@pytest.mark.parametrize(
+    ("method", "answer"),
+    [("choose", 1), ("number", True), ("number", "x"), ("confirm", "yes")],
+)
+def test_scripted_prompter_rejects_mistyped_answers(method: str, answer: object) -> None:
+    prompter = ScriptedPrompter([answer])
+    ask: dict[str, Callable[[], object]] = {
+        "choose": lambda: prompter.choose("q", [], "d"),
+        "number": lambda: prompter.number("q", 0, 1, 0),
+        "confirm": lambda: prompter.confirm("q", default=True),
+    }
+    with pytest.raises(TypeError, match="scripted answer"):
+        ask[method]()
+
+
+def test_scripted_prompter_raises_scripted_exceptions() -> None:
+    prompter = ScriptedPrompter([KeyboardInterrupt()])
+    with pytest.raises(KeyboardInterrupt):
+        prompter.confirm("q", default=True)
+
+
+def test_fake_model_store_downloads_and_fails() -> None:
+    store = FakeModelStore()
+    seen: list[tuple[int, int]] = []
+    assert store.is_present(FAKE_MODEL) is False
+    store.download(FAKE_MODEL, lambda done, total: seen.append((done, total)))
+    assert seen == [(0, 10), (5, 10), (10, 10)]
+    assert store.is_present(FAKE_MODEL) is True
+    failing = FakeModelStore(steps=[], fail=ServiceUnavailable("offline"))
+    with pytest.raises(ServiceUnavailable):
+        failing.download(FAKE_MODEL, lambda done, total: None)
+    assert failing.is_present(FAKE_MODEL) is False
+    assert failing.downloads == ["fake"]
+
+
+def test_in_memory_settings_store_records_writes() -> None:
+    store = InMemorySettingsStore({"voice": "a"}, {"rate": 2.0})
+    store.write_value("voice", "b")
+    assert store.read_file() == {"voice": "b"}
+    assert store.read_env() == {"rate": 2.0}
+    assert store.writes == [("voice", "b")]
+    assert store.setup_completed() is False
+    store.mark_setup_completed()
+    assert store.setup_completed() is True
+
+
+def test_fake_sample_player_records() -> None:
+    player = FakeSamplePlayer()
+    player.play("hi", "a", "en", 1.0, 50)
+    assert player.played == [("hi", "a", "en", 1.0, 50)]

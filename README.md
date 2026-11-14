@@ -17,15 +17,34 @@ macOS 14+ on Apple Silicon, 8 GB RAM (16 GB recommended), ~4 GB disk. Other plat
 
 ## Install
 
-Needs [uv](https://docs.astral.sh/uv/). From a checkout of this repository:
+Needs [uv](https://docs.astral.sh/uv/). Straight from GitHub:
+
+```bash
+uv tool install git+https://github.com/MlecznyU/voxlektor
+```
+
+or from a checkout of this repository:
 
 ```bash
 uv tool install --editable .
 ```
 
 This puts `vxl` and `voxlektor` into `~/.local/bin` (make sure it is on your `PATH`). Undo with
-`uv tool uninstall voxlektor`. The first reading downloads the model and starts the
-daemon by itself; later readings reuse it.
+`uv tool uninstall voxlektor`. Then run the setup once (it is required before the first
+reading, and you can run it again at any time):
+
+```bash
+vxl setup
+```
+
+It walks you through the engine, the model download (about 1.7 GB; it shows the model license
+and asks you to accept it), the voice, base language, rate and volume (with samples) and the
+service settings; Enter keeps the shown value. Tools without a terminal use the flag mode:
+`vxl setup --yes [--voice V --volume N ... --accept-model-license]`. At the end, setup stops
+a running daemon so the next start uses the new settings (the flag mode only when something
+changed). An invalid value in `config.toml` or a `VOXLEKTOR_*` variable does not stop setup: it
+says which value it ignores and writes a valid one. After that, the first reading starts the
+daemon by itself (with `autostart = true`); later readings reuse it.
 
 ## Commands
 
@@ -39,6 +58,7 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `--voice`, `-v NAME` | Voice for this reading. |
 | `--lang`, `-l auto\|pl\|en` | Language for this reading. |
 | `--rate`, `-r 0.5..3.0` | Playback rate for this reading. |
+| `--volume 0..100` | Volume for this reading; 50 = the even, normalised level. |
 | `--now` | Replace the current reading instead of queueing. |
 | `-f FILE` | Read the text from FILE (not together with TEXT). |
 | `vxl pause` / `resume` | Pause and resume the reading. |
@@ -52,6 +72,14 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `vxl voices` | List voices; `*` marks the default. |
 | `vxl config voice NAME` | Set the default voice. |
 | `vxl config show` | Show the effective settings in the `config.toml` layout. |
+| `vxl setup` | Guided setup with menus and samples (required once before reading; re-runnable). |
+| `--yes` | No questions, no samples, no daemon start: given options, current values for the rest. |
+| `--engine E`, `--voice V`, `--base-lang pl\|en` | Values for `--yes`. |
+| `--rate R`, `--volume N`, `--idle DUR`, `--autostart/--no-autostart` | Values for `--yes`. |
+| `--accept-model-license` | Needed with `--yes` when the model still has to be downloaded. |
+
+Until `vxl setup` has completed, reading exits `1` with `voxlektor is not set up yet; run: vxl
+setup`; control commands keep working.
 
 Exit codes: `0` ok, `1` user error (bad input or option, unknown voice, invalid duration),
 `2` service unavailable (daemon failed or does not answer, engine or audio failure),
@@ -64,7 +92,7 @@ Bundled voices: `v0-default`, `f1-warm`, `f2-narrator`, `f3-bright`, `m1-calm`, 
 
 Precedence: command-line flag > environment variable > `config.toml` > default. The file lives
 in `~/.config/voxlektor/config.toml`; `vxl config voice NAME` writes it, and `vxl config show`
-prints what is in effect. `voice`, `lang`, `base_lang` and `rate` travel with every request, so a
+prints what is in effect. `voice`, `lang`, `base_lang`, `rate` and `volume` travel with every request, so a
 change applies to the next reading of a running daemon. `engine`, `history` and
 `service.idle_timeout` are read when the daemon starts (`vxl idle` changes the timeout live).
 
@@ -75,6 +103,7 @@ voice = "v0-default"
 lang = "auto"       # auto, pl or en
 base_lang = "pl"    # pl or en; see "Language detection"
 rate = 1.0          # 0.5 to 3.0
+volume = 50         # 0 to 100; 50 = even level
 history = 20        # chunks kept for `vxl back`
 
 [service]
@@ -89,6 +118,7 @@ autostart = true       # false = read in the calling process, without a daemon
 | `lang` | `VOXLEKTOR_LANG` | `auto` |
 | `base_lang` | `VOXLEKTOR_BASE_LANG` | `pl` |
 | `rate` | `VOXLEKTOR_RATE` | `1.0` |
+| `volume` | `VOXLEKTOR_VOLUME` | `50` |
 | `service.idle_timeout` | `VOXLEKTOR_IDLE_TIMEOUT` | `10m` |
 | `service.autostart` | `VOXLEKTOR_AUTOSTART` | `true` |
 | `history` | none | `20` |
@@ -168,6 +198,32 @@ each; their cause is unknown and still to be investigated (`v0-default` English 
 not affected). In total the run had 3 underruns: one at rate 1.5 and two in the outlier rows.
 Time to first audio is about 4 to 5 s here, above the 3 s goal; the first chunk is a whole
 paragraph, which is the likely cause.
+
+## License & model terms
+
+**voxlektor's code** is licensed under the [Apache License 2.0](LICENSE), Copyright 2026
+MlecznyU. You may use, modify and redistribute it under that license.
+
+**The speech model is not part of this repository** and is not covered by that license. It is
+downloaded from Hugging Face on first use (or by `vxl setup`) and comes with its own terms:
+
+- **OmniVoice weights** ([k2-fsa/OmniVoice](https://huggingface.co/k2-fsa/OmniVoice), used here
+  as the MLX conversion `mlx-community/OmniVoice-bf16`) are licensed **CC-BY-NC**: research and
+  other **non-commercial use only**, because of constraints from its training data (such as the
+  Emilia dataset). OmniVoice's own code is Apache 2.0.
+- The model's **audio tokenizer** is derived from Higgs Audio v2 and is subject to Boson AI's
+  own license for it.
+- The **7 bundled voices** (`src/voxlektor/bundled_voices`) are synthetic: each reference sample
+  was designed from a text description with VoxCPM2 (Apache 2.0). They are not recordings of
+  real people.
+- Do not use voxlektor to clone or impersonate anyone's voice without their consent, or for
+  fraud or deception. Check that your use complies with the model licenses and the law where you
+  live; you are responsible for how you use it.
+
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests are
+merged at the author's discretion.
 
 ## More
 

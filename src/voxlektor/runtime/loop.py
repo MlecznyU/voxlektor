@@ -168,10 +168,10 @@ class CoreLoop:
                 self._schedule_wake(at, bound.loop)
             case CancelWake():
                 self._cancel_wakes()
-            case PlayCue(cue):
+            case PlayCue(cue, volume):
                 if cue is Cue.STOPPED:  # only a failed reading plays it, after stopping it
                     self._advance_epoch(self._epoch + 1)
-                self._cues.play(cue)
+                self._cues.play(cue, volume)
             case Exit():
                 self._stop(bound)
             case _:

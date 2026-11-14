@@ -12,7 +12,8 @@ from voxlektor.domain.errors import InvalidDuration, InvalidSetting
 from voxlektor.domain.settings import merge_layers, parse_duration
 
 _CONFIG_VERSION = 1
-_TOP_KEYS = ("engine", "voice", "lang", "base_lang", "rate", "history")
+_SETUP_MARKER = "setup_completed"  # not a Settings field: written only by `vxl setup`
+_TOP_KEYS = ("engine", "voice", "lang", "base_lang", "rate", "volume", "history")
 _SERVICE_KEYS = ("idle_timeout", "autostart")
 _ENV_NAMES = {
     "engine": "VOXLEKTOR_ENGINE",
@@ -20,6 +21,7 @@ _ENV_NAMES = {
     "lang": "VOXLEKTOR_LANG",
     "base_lang": "VOXLEKTOR_BASE_LANG",
     "rate": "VOXLEKTOR_RATE",
+    "volume": "VOXLEKTOR_VOLUME",
     "idle_timeout": "VOXLEKTOR_IDLE_TIMEOUT",
     "autostart": "VOXLEKTOR_AUTOSTART",
 }
@@ -33,7 +35,7 @@ def _coerce(key: str, raw: str, source: str) -> str | int | float | bool:
         match key:
             case "rate":
                 return float(raw)
-            case "history":
+            case "history" | "volume":
                 return int(raw)
             case "autostart":
                 lowered = raw.strip().lower()
@@ -101,6 +103,20 @@ class TomlSettingsStore:
             service[key] = typed  # pyright: ignore[reportUnknownVariableType]
         else:
             data[key] = typed
+        self._save(data)
+
+    def setup_completed(self) -> bool:
+        """``vxl setup`` has finished once (top-level ``setup_completed = true``)."""
+        return self._load().get(_SETUP_MARKER) is True
+
+    def mark_setup_completed(self) -> None:
+        """Record a finished setup; every other key and table is kept as it is."""
+        data = self._load()
+        data["config_version"] = _CONFIG_VERSION
+        data[_SETUP_MARKER] = True
+        self._save(data)
+
+    def _save(self, data: dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_name(self._path.name + ".tmp")
         tmp.write_bytes(tomli_w.dumps(data).encode())

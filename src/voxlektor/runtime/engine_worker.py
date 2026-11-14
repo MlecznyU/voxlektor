@@ -7,7 +7,8 @@ leave it. Voice prompts are kept here, by voice name, for the current engine loa
 ``on_result``/``on_error`` are called ON THE WORKER THREAD; the caller (``runtime.loop``) passes
 callbacks that hop back onto the loop with ``call_soon_threadsafe``. A callback that raises is
 logged and never stops the worker. The result of a ``Generate`` is ``(audio, gen_seconds)``:
-the joined, time-stretched audio and how long it took; every other job yields ``None``.
+the joined, time-stretched audio (then, when a ``level`` function is given, normalised and set to
+the chunk's volume) and how long it took; every other job yields ``None``.
 
 Epochs and cooperative cancellation: the loop thread calls ``cancel_before(epoch)`` whenever it
 learns that the Session's epoch has moved (a shared int, written on the loop thread, read here).
@@ -57,10 +58,12 @@ class EngineWorker:
         provider: EngineProvider,
         repo: VoiceRepository,
         stretch: Callable[[npt.NDArray[np.float32], float], npt.NDArray[np.float32]],
+        level: Callable[[npt.NDArray[np.float32], int, int], npt.NDArray[np.float32]] | None = None,
     ) -> None:
         self._provider = provider
         self._repo = repo
         self._stretch = stretch
+        self._level = level
         self._engine: Engine | None = None  # touched only on the worker thread
         self._prompts: dict[str, VoicePrompt] = {}  # likewise
         self._min_epoch = 0  # written on the loop thread, read on the worker thread
@@ -167,4 +170,7 @@ class EngineWorker:
         pieces = [piece.samples for piece in engine.synthesize(chunk.text, chunk.lang, prompt)]
         joined = np.concatenate(pieces) if pieces else np.zeros(0, dtype=np.float32)
         samples = self._stretch(joined.astype(np.float32, copy=False), chunk.rate)
-        return AudioChunk(samples, engine.spec.sample_rate), time.perf_counter() - started
+        sample_rate = engine.spec.sample_rate
+        if self._level is not None:
+            samples = self._level(samples, sample_rate, chunk.volume)
+        return AudioChunk(samples, sample_rate), time.perf_counter() - started

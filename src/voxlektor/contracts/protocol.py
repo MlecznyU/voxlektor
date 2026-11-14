@@ -5,7 +5,7 @@ client can depend on this module alone. Changes in v1 are strictly additive.
 """
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import msgspec
 
@@ -49,6 +49,8 @@ class SpeakRequest(_Request, tag="speak"):
     now: bool = False
     # Added within v1 (P1): last, so positional construction of this class is unchanged.
     base_lang: Literal["pl", "en"] | None = None  # tie fallback of `auto` detection
+    # Added within v1 (Etap 1.1); daemons before Etap 1.1 ignore it. 50 = the even level.
+    volume: Annotated[int, msgspec.Meta(ge=0, le=100)] | None = None
 
 
 class PauseRequest(_Request, tag="pause"):

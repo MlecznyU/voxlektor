@@ -31,7 +31,7 @@ src/voxlektor/
   contracts/                  PUBLIC, VERSIONED
     protocol.py               PROTOCOL_VERSION=1, MAX_FRAME, Request/Reply/Event (msgspec tagged unions), ErrorCode
     codec.py                  encode_line / decode_request / decode_reply; ProtocolError(code)
-    engine.py                 ENGINE_API=1, Engine SPI, Capability, EngineSpec, VoiceRef, VoicePrompt, AudioChunk
+    engine.py                 ENGINE_API=1, Engine SPI, Capability, EngineSpec, ModelInfo, VoiceRef, VoicePrompt, AudioChunk
     voicefmt.py               VOICE_FORMAT=1, VoiceMeta (voice.toml), file names, prompt_cache_name(), ref limits
 
   domain/                     PURE: sync, no I/O, no numpy
@@ -46,12 +46,13 @@ src/voxlektor/
     text/limits.py            MAX_CHARS / MERGE_BELOW shared by split_text and plan_reading (not frozen)
 
   app/                        SYNC, no threads and no asyncio; ports only
-    ports.py                  Clock, AudioOutput, CuePlayer, VoiceRepository, SettingsStore, PlatformInfo, EngineProvider
+    ports.py                  Clock, AudioOutput, CuePlayer, VoiceRepository, SettingsStore (+ setup marker), PlatformInfo, EngineProvider; setup: Prompter (+ Option), SamplePlayer, ModelStore
     commands.py               application commands (independent of the protocol version)
     effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit, PlayCue(Cue); Reply, Outcome
     session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_prompt_failed/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded
     voice_prompts.py          get_or_build_prompt(): cache via VoiceRepository + Engine.serialize_prompt; fresh= rebuilds
     voices.py                 VoiceCatalog: list/resolve/ensure_bundled
+    setup.py                  run_interactive() (engine, model + license, voice, base language, rate, volume, service; writes at the end) and apply_flags() (silent); SetupResult, SetupCancelled
 
   runtime/                    imperative shell: threads + loop; knows ports, not technologies
     loop.py                   CoreLoop: asyncio, calls Session, executes Effects, call_soon_threadsafe, wake timers (call_at)
@@ -61,8 +62,10 @@ src/voxlektor/
 
   adapters/                   technology; families independent of each other
     engines/omnivoice_mlx.py  OmniVoice via mlx-audio; pinned revision; returns numpy copies; NO file I/O
+    engines/omnivoice_model.py  ModelInfo of OmniVoice (repo, revision, size, license); no MLX import
+    models/hf_cache.py        HfModelStore: pinned snapshot in the Hugging Face cache (is_present, download with progress)
     audio/sounddevice_out.py  AudioOutput on a PortAudio callback; pause = silence
-    audio/dsp.py              time_stretch() (pytsmod WSOLA)
+    audio/dsp.py              time_stretch() (pytsmod WSOLA); level() = normalise -> gain(volume) -> limit
     audio/memory_out.py       MemoryOutput + MemoryCuePlayer: device-less (VOXLEKTOR_OUTPUT=memory; also used by tests)
     audio/cues.py             SoundDeviceCuePlayer: own short stream per cue (RETRY tone, STOPPED clip); close() at stop
     audio/portaudio.py        refresh_devices(): re-initialises PortAudio (follows the default output device) only while no stream is open
@@ -74,32 +77,33 @@ src/voxlektor/
     transport/unix_server.py  asyncio server: frames (one line each, several per connection), MAX_FRAME, 0600
     transport/unix_client.py  blocking client (no asyncio): request(), probe() (also used by `serve`)
     procs/spawn.py            daemon spawn (argv, start_new_session), stale regular file at the socket path
+    terminal/menus.py         QuestionaryPrompter: arrow-key menus for `vxl setup` (Esc / no answer -> SetupCancelled; Ctrl+C propagates)
 
   bootstrap/
     environment.py            process settings (HF_HUB_DISABLE_IMPLICIT_TOKEN) before engines are loaded
-    registry.py               engines via `voxlektor.engines` entry points (lazily)
+    registry.py               engines via `voxlektor.engines` entry points (lazily); engine_models() via the light `voxlektor.engine_models` group
     platform_select.py        sys.platform/machine -> platform adapter
-    client.py                 lightweight graph for the CLI (transport + spawn + settings)
+    client.py                 lightweight graph for the CLI (transport + spawn + settings); for setup: DaemonSamplePlayer (samples via speak + status polling), build_setup_client (skips invalid config/env values with a warning), model_store / setup_prompter (pick HfModelStore and QuestionaryPrompter, imported lazily)
     daemon.py                 build_daemon(settings, *, transport, ...) -> Daemon (loop, run(); owns its socket + pid file)
 
   entrypoints/
-    cli/{app,speak,control,voices,config,output}.py
+    cli/{app,speak,control,voices,config,output,setup}.py
     daemon.py                 `serve`: platform check, single instance (flock voxlektor.lock), stale socket, rotating log, signals
     oneshot.py                in-process reading (CoreLoop without transport)
 
   testing/
-    fakes.py                  FakeEngine, MemoryOutput, FakeClock, InMemoryVoiceRepository, InMemorySettings
+    fakes.py                  FakeEngine (+ FAKE_MODEL), MemoryOutput, FakeClock, InMemoryVoiceRepository, InMemorySettingsStore; setup: ScriptedPrompter (ENTER), FakeSamplePlayer, FakeModelStore
     simulator.py              deterministic driver: Session + immediate worker + fake output
     engine_contract.py        suite that every engine passes
 ```
-Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{engines,doctor,render}.py`, `adapters/engines/voxcpm2_mlx.py`, `adapters/audio/wavfile.py`, `adapters/models/hf_hub.py`, `adapters/platform/linux.py`, `entrypoints/{render.py,cli/setup.py}`.
+Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{engines,doctor,render}.py`, `adapters/engines/voxcpm2_mlx.py`, `adapters/audio/wavfile.py`, `adapters/platform/linux.py`, `entrypoints/render.py` (the model store, `adapters/models/hf_cache.py`, and `entrypoints/cli/setup.py` arrived in Etap 1.1).
 
 ## 3. Threads: who owns what
 
 | Thread / process | Owner | Does | Never |
 |---|---|---|---|
 | Daemon main (asyncio) | `runtime.loop.CoreLoop` | socket server, **all Session calls**, Effects, timers | does not block > a few ms; does not call the engine |
-| Engine thread (exactly 1) | `runtime.engine_worker` | every Engine SPI call, time-stretch, copy to numpy | does not change Session state; hands results back via `call_soon_threadsafe` |
+| Engine thread (exactly 1) | `runtime.engine_worker` | every Engine SPI call, time-stretch, level (normalise, volume, limit), copy to numpy | does not change Session state; hands results back via `call_soon_threadsafe` |
 | PortAudio callback | `adapters.audio.sounddevice_out` | copies frames, silence while paused, end/error signal via `call_soon_threadsafe` | does not allocate, log or call app |
 | PortAudio cue callback | `adapters.audio.cues` | copies the frames of one cue on its own short stream (mixed by CoreAudio, plays while reading is paused) | does not call back at all |
 | CLI process | `entrypoints.cli` + `unix_client` | blocking socket I/O | does not import asyncio, numpy or MLX on the control path |
@@ -114,7 +118,7 @@ Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{
 | Contract | Source | Derived | Rules |
 |---|---|---|---|
 | **Socket protocol v1** | `contracts/protocol.py` + `codec.py` | `docs/protocol.md`, `docs/protocol/v1.schema.json` (generated; CI fails when out of date), `tests/contracts/protocol_v1/*.jsonl` | 1 JSON object per line, ≤ 1 MiB, `"v":1`; every request has an `id` echoed in the reply; errors `{"code","message"}` from `ErrorCode` (new codes may be added within v1; clients treat unknown codes as `internal`); events `{"v","event",…}` only after `subscribe`; in v1 changes are strictly additive, new commands advertised in `status.caps` |
-| **Engine SPI** | `contracts/engine.py` (`ENGINE_API=1`) + `voxlektor.engines` entry points | `testing/engine_contract.py` | `EngineSpec` (id, revision, sample_rate, languages, capabilities ⊆ {LIVE, RENDER, CLONE, DESIGN}); `load`, `unload`, `prepare_voice(VoiceRef) -> VoicePrompt`, `serialize_prompt`/`deserialize_prompt` (bytes + `prompt_format`), `synthesize(text, lang, prompt) -> Iterator[AudioChunk]`; engines do not touch the file system |
+| **Engine SPI** | `contracts/engine.py` (`ENGINE_API=1`) + `voxlektor.engines` entry points (+ `voxlektor.engine_models`: a light `ModelInfo` per engine, read by setup without importing the engine) | `testing/engine_contract.py` | `EngineSpec` (id, revision, sample_rate, languages, capabilities ⊆ {LIVE, RENDER, CLONE, DESIGN}); `load`, `unload`, `prepare_voice(VoiceRef) -> VoicePrompt`, `serialize_prompt`/`deserialize_prompt` (bytes + `prompt_format`), `synthesize(text, lang, prompt) -> Iterator[AudioChunk]`; engines do not touch the file system |
 | **Voice format** | `contracts/voicefmt.py` (`VOICE_FORMAT=1`) | none (the module is the reference) | `voices/<name>/ref.wav` (mono, ≤ 30 s), `ref.txt`, `voice.toml` = source of truth; `cache/<engine>-<rev8>-p<prompt_format>.bin` disposable; only `cache/` is ever deleted |
 | Config (semi-public) | `domain/settings.py` + `adapters/storage/settings_toml.py` | table in README | `config_version = 1`; unknown keys preserved on write |
 | CLI (semi-public) | `entrypoints/cli/app.py` | README | exit codes: 0 ok, 1 user error, 2 service unavailable, 3 unsupported platform, 130 interrupted (Ctrl+C) |

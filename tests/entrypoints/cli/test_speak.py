@@ -189,3 +189,47 @@ def test_one_shot_exit_code_is_passed_on(wire: FakeWire, monkeypatch: pytest.Mon
 
     monkeypatch.setattr(oneshot, "run", failing_run)
     assert main(["hello"]) == 2
+
+
+@pytest.mark.parametrize(
+    "argv", [["say", "--volume", "20", "hi"], ["--volume", "20", "hi"], ["--volume=20", "hi"]]
+)
+def test_volume_flag_goes_into_the_request(wire: FakeWire, argv: list[str]) -> None:
+    assert main(argv) == 0
+    ((req),) = wire.requests
+    assert req["volume"] == 20
+
+
+def test_every_request_carries_the_effective_volume(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert main(["hi"]) == 0
+    assert wire.requests[-1]["volume"] == 50
+    monkeypatch.setenv("VOXLEKTOR_VOLUME", "70")
+    assert main(["hi"]) == 0
+    assert wire.requests[-1]["volume"] == 70
+    assert main(["--volume", "10", "hi"]) == 0
+    assert wire.requests[-1]["volume"] == 10
+
+
+@pytest.mark.parametrize("value", ["200", "-1", "loud"])
+def test_invalid_volume_exits_1_before_any_request(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str], value: str
+) -> None:
+    assert main([f"--volume={value}", "hi"]) == 1
+    assert wire.requests == []
+    if value != "loud":
+        assert "volume must be an integer between 0 and 100" in capsys.readouterr().err
+
+
+def test_volume_reaches_one_shot_mode(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOXLEKTOR_AUTOSTART", "false")
+    seen: list[Settings] = []
+
+    def fake_run(text: str, settings: Settings) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr(oneshot, "run", fake_run)
+    assert main(["--volume", "80", "hello"]) == 0
+    assert [s.volume for s in seen] == [80]

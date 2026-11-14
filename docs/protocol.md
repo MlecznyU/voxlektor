@@ -24,7 +24,7 @@ by hand). Golden examples: `tests/contracts/protocol_v1/{requests,replies}.jsonl
 
 | cmd | arguments | reply `data` |
 |---|---|---|
-| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces the current reading) | `{"chunks": N}`: number of planned chunks (0 for empty or whitespace-only text) |
+| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces the current reading), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it) | `{"chunks": N}`: number of planned chunks (0 for empty or whitespace-only text) |
 | `pause` | none | `{}` |
 | `resume` | none | `{}` |
 | `skip` | none | `{}` |
@@ -41,6 +41,9 @@ Examples:
 ```
 > {"cmd":"speak","v":1,"id":"1","text":"Hello world.","voice":"m1-calm","lang":"en","rate":1.25,"now":true}
 < {"v":1,"id":"1","ok":true,"data":{"chunks":1}}
+
+> {"cmd":"speak","v":1,"id":"1a","text":"A little louder.","volume":70}
+< {"v":1,"id":"1a","ok":true,"data":{"chunks":1}}
 
 > {"cmd":"idle","v":1,"id":"2","timeout":"10m"}
 < {"v":1,"id":"2","ok":true,"data":{"idle_timeout_s":600}}

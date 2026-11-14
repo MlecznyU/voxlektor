@@ -28,6 +28,7 @@ from typing import Protocol
 
 import msgspec
 
+from voxlektor.adapters.audio.dsp import level as dsp_level
 from voxlektor.adapters.audio.dsp import time_stretch
 from voxlektor.adapters.audio.memory_out import MemoryCuePlayer, MemoryOutput
 from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
@@ -219,7 +220,8 @@ def build_daemon(
             cues, close_cues = _device_cues()
     clock = _MonotonicClock()
     session = Session(settings, catalog, clock)
-    worker = EngineWorker(load_engine, repo, time_stretch)  # starts the engine thread
+    # Starts the engine thread; every chunk: time_stretch, then level (normalise, volume, limit).
+    worker = EngineWorker(load_engine, repo, time_stretch, level=dsp_level)
     try:
         core = CoreLoop(session, worker, output, AudioBuffers(), clock, cues)
     except BaseException:

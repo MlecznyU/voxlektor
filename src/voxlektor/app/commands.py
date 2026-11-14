@@ -14,12 +14,14 @@ class Speak:
 
     ``base_lang`` is the language ``auto`` detection falls back to on a tie (owner-approved P1);
     it is keyword-only so that the positional order of the other fields stays unchanged.
+    ``volume`` (0..100, 50 = the even level; Etap 1.1) is keyword-only for the same reason.
     """
 
     text: str
     voice: str | None
     lang: LangPref | None
     base_lang: Lang | None = field(default=None, kw_only=True)
+    volume: int | None = field(default=None, kw_only=True)
     rate: float | None
     now: bool
 
