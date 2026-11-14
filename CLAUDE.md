@@ -3,7 +3,8 @@
 Local text-to-speech service plus CLI (`voxlektor` / `vxl`) for Apple Silicon Macs. A warm daemon
 keeps an MLX engine loaded and speaks over a Unix socket (protocol v1); the CLI is a thin, fast
 client. Python 3.12, `uv`, English only in every file (Polish only as test/sample data).
-Map of the code: `docs/architecture.md` (binding). Plan: `docs/superpowers/plans/`.
+Map of the code: `docs/architecture.md` (binding). Specs and plans are local working files in
+`docs/superpowers/` (git-ignored, not part of the repository).
 
 ## Layers (imports point downward only)
 
