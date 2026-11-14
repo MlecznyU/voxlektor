@@ -6,6 +6,11 @@ with exit 1 and a hint); it plays samples through the daemon, which it starts ev
 ``autostart = false``. Flag mode asks nothing, plays nothing and starts no daemon; a model that
 has to be downloaded needs ``--accept-model-license``; download progress goes to stderr.
 
+``--check`` (no other options) changes nothing and starts nothing: it prints one JSON line
+(``ready``, ``setup_completed``, ``version``, ``config_path``, ``engine``, ``model`` with
+``present`` and its license, the effective ``settings``) and exits 0 when setup has completed
+and the model is present, 1 otherwise. It needs no terminal; tools such as dialogue-box use it.
+
 An invalid value in ``config.toml`` or a ``VOXLEKTOR_*`` variable does not stop setup (it is
 how a broken config gets repaired): it is reported (``ignoring invalid …``), its default is
 used, and setup then writes valid values.
@@ -21,6 +26,7 @@ model store (huggingface_hub) are imported inside the command, never on the CLI 
 bootstrap picks the concrete menus and model store.
 """
 
+import json
 import sys
 import time
 from collections.abc import Callable
@@ -29,6 +35,7 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
+import voxlektor
 from voxlektor.app.ports import ModelStore
 from voxlektor.bootstrap.client import ClientContext, DaemonSamplePlayer, build_setup_client
 from voxlektor.contracts.engine import ModelInfo
@@ -79,11 +86,16 @@ def setup(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
         bool,
         typer.Option("--accept-model-license", help="Accept the model license (download)."),
     ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check", help="Change nothing: print one JSON line; exit 0 when ready, 1 if not."
+        ),
+    ] = False,
 ) -> int:
     """Set up voxlektor (engine, model, voice, language, rate, volume, service)."""
     from voxlektor.bootstrap import environment  # noqa: PLC0415  # setup only
 
-    ctx, current = _client()  # current: the file's values, not the env's
     flags: dict[str, object] = {
         "engine": engine,
         "voice": voice,
@@ -93,6 +105,12 @@ def setup(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
         "idle_timeout": idle,
         "autostart": autostart,
     }
+    if check and (yes or accept_model_license or any(v is not None for v in flags.values())):
+        raise typer.BadParameter("--check takes no other options")
+    ctx, current = _client()  # current: the file's values, not the env's
+    if check:
+        environment.prepare()
+        return _check(ctx)
     if not yes:
         if any(value is not None for value in flags.values()):
             raise typer.BadParameter("setting options need --yes (the mode without questions)")
@@ -122,6 +140,53 @@ def _client() -> tuple[ClientContext, Settings]:
             f"{err.message}: voxlektor runs on macOS 14 or later on Apple Silicon. "
             f"Ask for your platform: {ISSUES_URL} or contribute it: {PULLS_URL}"
         ) from None
+
+
+def _check(ctx: ClientContext) -> int:
+    """Report readiness for tools; read-only (no daemon, no download, nothing written).
+
+    ``settings`` are the effective ones (env included, invalid values reported and replaced by
+    their defaults), as a reading would use them.
+    """
+    from voxlektor.bootstrap.client import model_store  # noqa: PLC0415  # huggingface_hub
+    from voxlektor.bootstrap.registry import engine_models  # noqa: PLC0415  # importlib.metadata
+
+    settings = ctx.settings
+    info = next(
+        (m for m in engine_models(include_hidden=True) if m.engine_id == settings.engine), None
+    )
+    model: dict[str, object] | None = None
+    if info is not None:
+        model = {
+            "present": model_store().is_present(info),
+            "repo": info.repo,
+            "revision": info.revision,
+            "size_bytes": info.size_bytes,
+            "license_name": info.license_name,
+            "license_url": info.license_url,
+            "commercial_use": info.commercial_use,
+        }
+    completed = ctx.store.setup_completed()
+    ready = completed and model is not None and model["present"] is True
+    report = {
+        "ready": ready,
+        "setup_completed": completed,
+        "version": voxlektor.__version__,
+        "config_path": str(ctx.config_path),
+        "engine": settings.engine,
+        "model": model,
+        "settings": {
+            "voice": settings.voice,
+            "lang": settings.lang,
+            "base_lang": settings.base_lang,
+            "rate": settings.rate,
+            "volume": settings.volume,
+            "idle_timeout_s": settings.idle_timeout_s,
+            "autostart": settings.autostart,
+        },
+    }
+    print(json.dumps(report))
+    return EXIT_OK if ready else EXIT_USER
 
 
 def _warn(message: str) -> None:

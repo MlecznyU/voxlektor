@@ -1,6 +1,7 @@
 """``vxl setup`` (interactive and ``--yes``) and the setup gate in front of speaking."""
 
 import io
+import json
 import sys
 import tomllib
 from collections.abc import Sequence
@@ -10,7 +11,9 @@ from typing import Any
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError
 
+import voxlektor
 from tests.entrypoints.cli.conftest import FakeWire, Tty
+from voxlektor.adapters.engines.omnivoice_model import MODEL
 from voxlektor.adapters.models import hf_cache
 from voxlektor.adapters.platform.unsupported import UnsupportedPlatform
 from voxlektor.adapters.terminal import menus
@@ -326,6 +329,119 @@ def test_flag_mode_rejects_invalid_values(
 ) -> None:
     assert main(["setup", "--yes", "--engine", "fake", *argv]) == 1
     assert not _config(fresh_home).exists()
+
+
+# ---------------------------------------------------------------- --check
+
+
+def _check(capsys: pytest.CaptureFixture[str]) -> tuple[int, dict[str, Any]]:
+    code = main(["setup", "--check"])
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1  # one JSON line, for tools
+    return code, json.loads(out)
+
+
+def test_check_before_setup_exits_1_and_reports_why(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, data = _check(capsys)
+    assert code == 1
+    assert data["ready"] is False
+    assert data["setup_completed"] is False
+    assert data["version"] == voxlektor.__version__
+    assert data["config_path"] == str(_config(fresh_home))
+    assert data["engine"] == "omnivoice"
+    assert data["model"] == {
+        "present": False,
+        "repo": "mlx-community/OmniVoice-bf16",
+        "revision": "8fb0b754cad788aaefec690cd55c207e8a628f85",
+        "size_bytes": MODEL.size_bytes,
+        "license_name": "CC-BY-NC-4.0",
+        "license_url": "https://huggingface.co/k2-fsa/OmniVoice",
+        "commercial_use": False,
+    }
+    assert data["settings"]["volume"] == 50
+    assert fresh_wire.requests == []  # read-only: no daemon, nothing written
+    assert not _config(fresh_home).exists()
+    assert hub.downloads == []
+
+
+def test_check_after_setup_with_the_model_present_exits_0(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--voice", "m1-calm", "--volume", "70"]) == 0
+    capsys.readouterr()
+    code, data = _check(capsys)
+    assert code == 0
+    assert data["ready"] is True
+    assert data["setup_completed"] is True
+    assert data["model"]["present"] is True
+    assert data["settings"] == {
+        "voice": "m1-calm",
+        "lang": "auto",
+        "base_lang": "pl",
+        "rate": 1.0,
+        "volume": 70,
+        "idle_timeout_s": 600,
+        "autostart": True,
+    }
+
+
+def test_check_with_setup_done_but_model_missing_is_not_ready(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes"]) == 0
+    hub.cached.clear()  # e.g. the HF cache was cleaned
+    capsys.readouterr()
+    code, data = _check(capsys)
+    assert code == 1
+    assert data["setup_completed"] is True
+    assert data["model"]["present"] is False
+    assert data["ready"] is False
+
+
+def test_check_with_an_unknown_engine_reports_no_model(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _config(fresh_home).parent.mkdir(parents=True)
+    _config(fresh_home).write_text('engine = "nope"\nsetup_completed = true\n')
+    code, data = _check(capsys)
+    assert code == 1
+    assert data["engine"] == "nope"
+    assert data["model"] is None
+    assert data["ready"] is False
+
+
+def test_check_tolerates_an_invalid_config_value(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _config(fresh_home).parent.mkdir(parents=True)
+    _config(fresh_home).write_text("volume = 500\n")
+    code = main(["setup", "--check"])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert json.loads(captured.out)["settings"]["volume"] == 50
+    assert "ignoring invalid" in captured.err
+
+
+@pytest.mark.parametrize("extra", [["--yes"], ["--volume", "70"], ["--accept-model-license"]])
+def test_check_combined_with_other_options_exits_1(
+    fresh_wire: FakeWire, hub: _Hub, extra: list[str]
+) -> None:
+    assert main(["setup", "--check", *extra]) == 1
+
+
+def test_check_needs_no_terminal(
+    fresh_wire: FakeWire,
+    hub: _Hub,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    code, _ = _check(capsys)
+    assert code == 1  # not ready, but answered: no "needs a terminal" refusal
 
 
 def test_stopping_when_no_daemon_runs_is_quiet(

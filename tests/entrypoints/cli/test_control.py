@@ -1,5 +1,6 @@
 """Control commands: playback, idle, unload, stop, status and serve."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -160,6 +161,30 @@ def test_status_lines(wire: FakeWire, capsys: pytest.CaptureFixture[str]) -> Non
 def test_status_error_reply_is_reported(wire: FakeWire) -> None:
     wire.fail("status", "internal", "the service is shutting down")
     assert main(["status"]) == 2
+
+
+def test_status_json_when_not_running(wire: FakeWire, capsys: pytest.CaptureFixture[str]) -> None:
+    wire.replies["status"] = NotRunning()
+    assert main(["status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"running": False}
+
+
+def test_status_json_is_the_daemon_status_plus_running(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.replies["status"] = {"ok": True, "data": STATUS}
+    assert main(["status", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1  # one line, for tools
+    assert json.loads(out) == {"running": True, **STATUS}
+
+
+def test_status_json_of_an_unresponsive_daemon_exits_2_without_json(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.fail("status", "internal", "the service is shutting down")
+    assert main(["status", "--json"]) == 2
+    assert capsys.readouterr().out == ""
 
 
 def test_serve_passes_the_idle_override(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:

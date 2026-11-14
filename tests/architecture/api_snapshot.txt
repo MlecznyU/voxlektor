@@ -21,6 +21,7 @@ cli:vxl setup
 cli:vxl setup --accept-model-license (default=False)
 cli:vxl setup --autostart (default=None)
 cli:vxl setup --base-lang (default=None)
+cli:vxl setup --check (default=False)
 cli:vxl setup --engine (default=None)
 cli:vxl setup --idle (default=None)
 cli:vxl setup --rate (default=None)
@@ -29,10 +30,12 @@ cli:vxl setup --volume (default=None)
 cli:vxl setup --yes (default=False)
 cli:vxl skip
 cli:vxl status
+cli:vxl status --json (default=False)
 cli:vxl stop
 cli:vxl stop-reading
 cli:vxl unload
 cli:vxl voices
+cli:vxl voices --json (default=False)
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer() -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.close(self) -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.play(self, cue: voxlektor.app.effects.Cue, volume: int = 50) -> None

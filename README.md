@@ -65,11 +65,13 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `vxl skip` / `back` | Next chunk / previous chunk. |
 | `vxl stop-reading` | Stop the reading; the engine stays warm. |
 | `vxl status` | State, engine, voice, idle timer, last reading metrics; `OFF` when no daemon runs. |
+| `--json` | One JSON line for tools: `{"running": false}`, or `{"running": true, ...}` with the [protocol `status` fields](docs/protocol.md#status). |
 | `vxl idle DUR` | Set the idle timeout live: `0` (never unload), `90s`, `10m`, `1h`. |
 | `vxl unload` | Free the model from RAM now; the daemon keeps running. |
 | `vxl stop` | Stop the daemon (`not running` and exit 0 when none runs). |
 | `vxl serve [--idle DUR]` | Run the daemon in the foreground (normally autostarted). |
 | `vxl voices` | List voices; `*` marks the default. |
+| `--json` | One JSON line for tools: `{"default": NAME, "voices": [...]}`. |
 | `vxl config voice NAME` | Set the default voice. |
 | `vxl config show` | Show the effective settings in the `config.toml` layout. |
 | `vxl setup` | Guided setup with menus and samples (required once before reading; re-runnable). |
@@ -77,6 +79,7 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `--engine E`, `--voice V`, `--base-lang pl\|en` | Values for `--yes`. |
 | `--rate R`, `--volume N`, `--idle DUR`, `--autostart/--no-autostart` | Values for `--yes`. |
 | `--accept-model-license` | Needed with `--yes` when the model still has to be downloaded. |
+| `--check` | Change nothing; print one JSON line (`ready`, `setup_completed`, `version`, `engine`, `model` with `present` and its license, effective `settings`); exit `0` when ready, `1` if not. |
 
 Until `vxl setup` has completed, reading exits `1` with `voxlektor is not set up yet; run: vxl
 setup`; control commands keep working.
