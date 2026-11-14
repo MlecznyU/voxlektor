@@ -82,7 +82,10 @@ class _LooseError(msgspec.Struct):
 
 
 class _LooseReply(msgspec.Struct):
-    """A reply whose error code is not yet checked against the closed ``ErrorCode`` enum."""
+    """A reply whose error code is not yet checked against ``ErrorCode``.
+
+    New codes may be added within v1; clients treat unknown codes as ``internal``.
+    """
 
     v: int
     id: str | None

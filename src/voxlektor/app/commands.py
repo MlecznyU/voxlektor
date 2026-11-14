@@ -3,18 +3,23 @@
 Independent of the wire protocol version; ``adapters.transport.mapping`` translates between them.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from voxlektor.domain.types import LangPref
+from voxlektor.domain.types import Lang, LangPref
 
 
 @dataclass(frozen=True, slots=True)
 class Speak:
-    """Read ``text``; ``None`` fields fall back to the settings; ``now`` replaces the reading."""
+    """Read ``text``; ``None`` fields fall back to the settings; ``now`` replaces the reading.
+
+    ``base_lang`` is the language ``auto`` detection falls back to on a tie (owner-approved P1);
+    it is keyword-only so that the positional order of the other fields stays unchanged.
+    """
 
     text: str
     voice: str | None
     lang: LangPref | None
+    base_lang: Lang | None = field(default=None, kw_only=True)
     rate: float | None
     now: bool
 

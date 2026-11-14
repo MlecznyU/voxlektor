@@ -5,10 +5,10 @@
 daemon, which probes and removes it under its flock, so a client never races a starting
 daemon). Then ``python -m voxlektor serve`` is spawned with an argv list (no shell), in a new
 session, with stdin from ``/dev/null`` and stdout/stderr appended to the platform's log file.
-``ping`` is retried every 0.1 s until it succeeds or ``wait_s`` has passed. The spawned process
-is not watched (ruling R33): when an old daemon is still shutting down, the new ``serve`` exits
-with "already running" after a few seconds, yet the old daemon's successor may still come up
-within ``wait_s``.
+``ping`` is retried every 0.1 s until it succeeds or ``wait_s`` has passed. Autostart right after
+a slow shutdown (final review C3): while an old daemon is still shutting down, the new ``serve``
+exits with "already running"; when the spawned child has exited and ``ping`` still fails, it is
+spawned again, at most ``_MAX_SPAWNS`` times in all, within the same ``wait_s``.
 """
 
 import stat
@@ -22,6 +22,7 @@ from voxlektor.app.ports import PlatformInfo
 from voxlektor.domain.errors import ServiceUnavailable
 
 _POLL_S = 0.1
+_MAX_SPAWNS = 3
 
 # Replaced by tests (fake clock); production uses the real ones.
 _sleep = time.sleep
@@ -33,8 +34,21 @@ def ensure_daemon(platform: PlatformInfo, ping: Callable[[], bool], wait_s: floa
         return
     _remove_stale_file(platform.socket_path())
     log_path = platform.log_path()
+    child = _spawn(log_path)
+    spawns = 1
+    deadline = _monotonic() + wait_s
+    while not ping():
+        if _monotonic() >= deadline:
+            raise ServiceUnavailable(f"voxlektor did not start within {wait_s:g} s; see {log_path}")
+        if child.poll() is not None and spawns < _MAX_SPAWNS:  # exited, e.g. "already running"
+            child = _spawn(log_path)
+            spawns += 1
+        _sleep(_POLL_S)
+
+
+def _spawn(log_path: Path) -> subprocess.Popen[bytes]:
     with log_path.open("ab") as log:
-        subprocess.Popen(  # fixed argv, never a shell
+        return subprocess.Popen(  # fixed argv, never a shell
             [sys.executable, "-m", "voxlektor", "serve"],
             start_new_session=True,
             stdin=subprocess.DEVNULL,
@@ -42,11 +56,6 @@ def ensure_daemon(platform: PlatformInfo, ping: Callable[[], bool], wait_s: floa
             stderr=log,
             cwd="/",
         )
-    deadline = _monotonic() + wait_s
-    while not ping():
-        if _monotonic() >= deadline:
-            raise ServiceUnavailable(f"voxlektor did not start within {wait_s:g} s; see {log_path}")
-        _sleep(_POLL_S)
 
 
 def _remove_stale_file(path: Path) -> None:

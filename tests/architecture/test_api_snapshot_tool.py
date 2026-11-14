@@ -74,6 +74,100 @@ def test_check_fails_on_diff(tmp_path: Path) -> None:
     assert "+ fakeapi:alpha(x: str) -> str" in result.stderr
 
 
+RICH = """
+from typing import Literal, Protocol
+
+import msgspec
+
+
+class Base(msgspec.Struct, tag_field="cmd"):
+    v: int
+    id: str
+
+
+class Child(Base, tag="child"):
+    text: str
+
+
+class Port(Protocol):
+    spec: int
+
+    def __call__(self, name: str) -> int: ...
+
+
+class Queue:
+    @property
+    def size(self) -> int:
+        return 0
+
+    async def drain(self) -> None:
+        return None
+
+
+async def serve(path: str) -> None:
+    return None
+
+
+type Command = Child | Base
+Mode = Literal["a", "b"]
+Pair = int | str
+Seconds = float
+
+
+class Boom(AssertionError):
+    pass
+"""
+
+
+def _snapshot_lines(tmp_path: Path) -> list[str]:
+    result = _run(tmp_path, "--approve")
+    assert result.returncode == 0, result.stderr
+    return (tmp_path / "snap.txt").read_text().splitlines()
+
+
+def test_records_the_whole_surface(tmp_path: Path) -> None:
+    _set_module(tmp_path, RICH)
+    lines = _snapshot_lines(tmp_path)
+    expected = [
+        # class property with its return annotation
+        "fakeapi:Queue.size: property -> int",
+        # coroutine functions and methods
+        "fakeapi:async Queue.drain(self) -> None",
+        "fakeapi:async serve(path: str) -> None",
+        # Protocol attribute and the allowlisted __call__
+        "fakeapi:Port.spec: int",
+        "fakeapi:Port.__call__(self, name: str) -> int",
+        # type alias bodies, plain aliases included
+        "fakeapi:Command: TypeAlias = fakeapi.Child | fakeapi.Base",
+        "fakeapi:Mode: TypeAlias = Literal['a', 'b']",
+        "fakeapi:Pair: TypeAlias = int | str",
+        "fakeapi:Seconds: TypeAlias = float",
+        # inherited struct fields resolved across the MRO, and the msgspec tag
+        "fakeapi:Child.v: int",
+        "fakeapi:Child.id: str",
+        "fakeapi:Child.text: str",
+        "fakeapi:Child [tag_field='cmd', tag='child']",
+        # an exception that keeps the builtin constructor
+        "fakeapi:Boom(*args: object)",
+    ]
+    for line in expected:
+        assert line in lines, line
+    assert not [line for line in lines if line.endswith(": ?") or "(...)" in line]
+
+
+def test_imported_names_are_not_recorded_as_aliases(tmp_path: Path) -> None:
+    _set_module(tmp_path, "from pathlib import Path\n\nHome = Path\n")
+    assert _snapshot_lines(tmp_path) == ["fakeapi:Home: TypeAlias = pathlib.Path"]
+
+
+def test_unreadable_signature_fails_loudly(tmp_path: Path) -> None:
+    _set_module(tmp_path, "class Table(dict[str, int]):\n    pass\n")
+    result = _run(tmp_path, "--approve")
+    assert result.returncode != 0
+    assert "cannot read the signature" in result.stderr
+    assert not (tmp_path / "snap.txt").exists()
+
+
 def test_committed_snapshot_is_valid_when_empty() -> None:
     result = subprocess.run(  # noqa: S603
         [sys.executable, str(SCRIPT), "--check"],

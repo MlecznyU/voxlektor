@@ -34,7 +34,8 @@ def test_load_engine_sets_the_hub_environment(monkeypatch: pytest.MonkeyPatch) -
     assert os.environ[HF_VAR] == "1"
 
 
-def test_prepare_does_not_override_an_explicit_value(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prepare_overrides_an_inherited_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2: an inherited ``0`` must not switch the implicit Hub token back on."""
     monkeypatch.setenv(HF_VAR, "0")
     environment.prepare()
-    assert os.environ[HF_VAR] == "0"
+    assert os.environ[HF_VAR] == "1"

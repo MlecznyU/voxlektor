@@ -1,12 +1,17 @@
 """The speak path: where the text comes from, autostart, and one-shot mode."""
 
+import io
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests.entrypoints.cli.conftest import FakeWire
+from voxlektor.contracts.protocol import MAX_FRAME
 from voxlektor.domain.settings import Settings
 from voxlektor.entrypoints import oneshot
+from voxlektor.entrypoints.cli import speak
 from voxlektor.entrypoints.cli.app import main
 
 
@@ -59,6 +64,100 @@ def test_say_without_text_on_a_terminal_exits_1(
     assert main(["say"]) == 1
     assert "no text" in capsys.readouterr().err
     assert wire.requests == []
+
+
+@pytest.fixture
+def no_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if the speak path builds a client (or autostarts a daemon)."""
+
+    def forbidden(flags: object) -> None:
+        raise AssertionError("build_client must not run for rejected text")
+
+    monkeypatch.setattr(speak, "build_client", forbidden)
+
+
+@pytest.mark.usefixtures("no_client")
+def test_too_long_file_exits_1_before_the_client(
+    wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notes = home / "long.txt"
+    notes.write_bytes(b"a" * (MAX_FRAME + 1))
+    assert main(["-f", str(notes)]) == 1
+    assert "text too long" in capsys.readouterr().err
+    assert wire.requests == []
+    assert wire.ensured == 0
+
+
+def test_file_of_exactly_max_frame_bytes_is_not_too_long(
+    wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notes = home / "edge.txt"
+    notes.write_bytes(b"a" * MAX_FRAME)
+    main(["-f", str(notes)])
+    assert "text too long" not in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("no_client")
+def test_fifo_is_refused(wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    fifo = home / "pipe"
+    os.mkfifo(fifo)
+    assert main(["-f", str(fifo)]) == 1
+    assert "not a regular file" in capsys.readouterr().err
+    assert wire.requests == []
+
+
+@pytest.mark.usefixtures("no_client")
+def test_directory_is_refused(
+    wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["-f", str(home)]) == 1
+    assert "not a regular file" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("no_client")
+def test_too_long_stdin_exits_1_before_the_client(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO("a" * (MAX_FRAME + 1)))
+    assert main([]) == 1
+    assert "text too long" in capsys.readouterr().err
+    assert wire.ensured == 0
+
+
+@pytest.mark.usefixtures("no_client")
+def test_too_long_binary_stdin_is_read_bounded(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    raw = io.BytesIO(b"a" * (3 * MAX_FRAME))
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(raw, encoding="utf-8"))
+    assert main([]) == 1
+    assert "text too long" in capsys.readouterr().err
+    assert raw.tell() <= MAX_FRAME + 1 + io.DEFAULT_BUFFER_SIZE  # never slurped whole
+
+
+def test_binary_stdin_is_decoded(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = io.BytesIO("Zażółć gęślą jaźń.".encode())
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(raw, encoding="utf-8"))
+    assert main([]) == 0
+    ((req),) = wire.requests
+    assert req["text"] == "Zażółć gęślą jaźń."
+
+
+@pytest.mark.usefixtures("no_client")
+def test_undecodable_stdin_exits_1(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"\xff\xfe"), encoding="utf-8"))
+    assert main([]) == 1
+    assert "cannot read stdin" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("no_client")
+def test_too_long_words_exit_1_before_the_client(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["say", "a" * (MAX_FRAME + 1)]) == 1
+    assert "text too long" in capsys.readouterr().err
 
 
 def test_autostart_off_reads_in_this_process(

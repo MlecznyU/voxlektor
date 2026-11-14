@@ -8,9 +8,11 @@ import pytest
 
 from tests.entrypoints.cli.conftest import FakeWire
 from voxlektor.adapters.platform.unsupported import UnsupportedPlatform
+from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
 from voxlektor.adapters.transport import unix_client
 from voxlektor.app.ports import PlatformInfo
 from voxlektor.bootstrap import client
+from voxlektor.contracts.protocol import MAX_FRAME
 from voxlektor.domain.errors import ServiceUnavailable
 from voxlektor.entrypoints.cli.app import main
 
@@ -227,9 +229,46 @@ def test_service_unavailable_exits_2(wire: FakeWire, capsys: pytest.CaptureFixtu
     assert "not running" in capsys.readouterr().err
 
 
-def test_oversized_text_exits_1(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_text_that_fits_but_whose_frame_does_not_exits_1(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Text just under ``MAX_FRAME`` passes the CLI bound; the frame around it is too large."""
     monkeypatch.setattr(client, "request", unix_client.request)
-    assert main(["say", "a " * (1 << 20)]) == 1
+    assert main(["say", "a" * (MAX_FRAME - 10)]) == 1
+    assert "larger than" in capsys.readouterr().err
+
+
+def test_speak_carries_the_effective_base_lang(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1: base_lang travels with every speak, so a changed setting needs no daemon restart."""
+    assert main(["hi"]) == 0
+    assert _speak(wire)["base_lang"] == "pl"
+    wire.requests.clear()
+    monkeypatch.setenv("VOXLEKTOR_BASE_LANG", "en")
+    assert main(["hi"]) == 0
+    assert _speak(wire)["base_lang"] == "en"
+
+
+def test_local_os_error_exits_2_without_traceback(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.replies["pause"] = OSError(28, "No space left on device")
+    assert main(["pause"]) == 2
+    err = capsys.readouterr().err
+    assert "No space left on device" in err
+    assert "Traceback" not in err
+
+
+def test_os_error_while_installing_voices_exits_2(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def read_only(self: object) -> None:
+        raise PermissionError(13, "Read-only file system")
+
+    monkeypatch.setattr(FsVoiceRepository, "install_bundled", read_only)
+    assert main(["voices"]) == 2
+    assert "Read-only file system" in capsys.readouterr().err
 
 
 def test_end_of_input_aborts_with_1(wire: FakeWire, capsys: pytest.CaptureFixture[str]) -> None:

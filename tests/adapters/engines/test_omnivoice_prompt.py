@@ -7,8 +7,10 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 import pytest
+from huggingface_hub.errors import LocalEntryNotFoundError
 
 from tests.fixtures.samples import PL_PARAGRAPH_110
+from voxlektor.adapters.engines import omnivoice_mlx
 from voxlektor.adapters.engines.omnivoice_mlx import OmniVoiceEngine
 from voxlektor.contracts.engine import VoicePrompt, VoiceRef
 
@@ -106,6 +108,44 @@ def test_synthesize_rejects_an_unsupported_language_eagerly() -> None:
 def test_synthesize_rejects_a_foreign_prompt_eagerly() -> None:
     with pytest.raises(TypeError, match="OmniVoice prompt"):
         OmniVoiceEngine().synthesize("x", "en", VoicePrompt("v0", 1, "not omni"))
+
+
+class _Hub:
+    """Fake ``snapshot_download``: records calls; ``cached`` decides the offline answer."""
+
+    def __init__(self, *, cached: bool) -> None:
+        self.cached = cached
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, repo_id: str, *, revision: str | None = None, **kwargs: object) -> str:
+        self.calls.append({"repo_id": repo_id, "revision": revision, **kwargs})
+        if kwargs.get("local_files_only") and not self.cached:
+            raise LocalEntryNotFoundError("not in the cache")
+        return "/hub/snapshot"
+
+
+@pytest.mark.parametrize("cached", [True, False], ids=["cache-hit", "cache-miss"])
+def test_load_is_offline_first(monkeypatch: pytest.MonkeyPatch, cached: bool) -> None:
+    """S3: no Hub call per load when the pinned snapshot is cached."""
+    hub = _Hub(cached=cached)
+    loaded: list[Path] = []
+
+    def load_model(path: Path) -> object:
+        loaded.append(path)
+        return object()
+
+    monkeypatch.setattr(omnivoice_mlx, "snapshot_download", hub)
+    monkeypatch.setattr(omnivoice_mlx, "load_model", load_model)
+    OmniVoiceEngine().load()
+    pinned: dict[str, object] = {
+        "repo_id": omnivoice_mlx.REPO,
+        "revision": omnivoice_mlx.OMNIVOICE_REVISION,
+    }
+    expected: list[dict[str, object]] = [{**pinned, "local_files_only": True}]
+    if not cached:
+        expected.append(pinned)  # the normal download, only on a cache miss
+    assert hub.calls == expected
+    assert loaded == [Path("/hub/snapshot")]
 
 
 def test_calls_before_load_fail_clearly_and_eagerly() -> None:

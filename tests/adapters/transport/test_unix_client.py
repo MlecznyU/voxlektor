@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from voxlektor.adapters.transport.unix_client import request
+from voxlektor.adapters.transport.unix_client import probe, request
 from voxlektor.contracts import protocol as p
 from voxlektor.contracts.codec import ProtocolError
 from voxlektor.domain.errors import NotRunning, ServiceUnavailable
@@ -180,6 +180,37 @@ def test_reply_for_another_request_is_alive_but_unavailable(path: Path) -> None:
 def test_other_socket_errors_are_service_unavailable(short_tmp: Path) -> None:
     too_long = short_tmp / ("x" * 120)  # longer than the AF_UNIX path limit
     _alive_but_unavailable(too_long, "cannot reach")
+
+
+def _not_ok(req: dict[str, object]) -> bytes:
+    error = {"code": "internal", "message": "shutting down"}
+    return json.dumps({"v": 1, "id": req["id"], "ok": False, "error": error}).encode() + b"\n"
+
+
+def _garbage(req: dict[str, object]) -> bytes:
+    return b"garbage\n"
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [(_ok, True), (_not_ok, False), (_garbage, False)],
+    ids=["ready", "not-ready", "garbage"],
+)
+def test_probe_of_a_listener(path: Path, answer: _Answer, expected: bool) -> None:
+    server = _OneShotServer(path, answer)
+    assert probe(path) is expected
+    server.join()
+    assert server.received[0]["cmd"] == "status"
+
+
+def test_probe_without_a_listener_is_none(path: Path) -> None:
+    assert probe(path) is None  # missing
+    path.write_text("stale")
+    assert probe(path) is None  # not a socket
+    path.unlink()
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.bind(str(path))
+        assert probe(path) is None  # refused
 
 
 def test_oversized_request_is_refused_before_connecting(path: Path) -> None:

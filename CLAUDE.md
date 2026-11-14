@@ -57,8 +57,11 @@ are never edited by hand.
 
 Frozen surface = everything in the plan's Interfaces blocks plus `contracts/*`, `app/ports.py`,
 `app/commands.py`, `app/effects.py`, CLI commands/options/exit codes, config keys and `VOXLEKTOR_*`
-env names. It is recorded in `tests/architecture/api_snapshot.txt`; tasks may only add the entries
-their own Interfaces block names (`uv run poe api-add`). If a frozen interface turns out to be
+env names. Python symbols and the CLI command tree are recorded in
+`tests/architecture/api_snapshot.txt`; config keys and env names are pinned by
+`tests/adapters/storage/test_settings_toml.py`, exit codes by `tests/entrypoints/cli/test_output.py`
+(130: `test_app.py`). Tasks may only add the snapshot entries their own Interfaces block names
+(`uv run poe api-add`). If a frozen interface turns out to be
 wrong, stop that part, do not work around it, and send an API change request:
 
 - **What**: current vs proposed, exact signatures; **Why**: what in the code forced it

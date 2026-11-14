@@ -65,6 +65,58 @@ def test_names_ignores_stray_files_and_dirs(tmp_path: Path) -> None:
     assert repo.names() == BUNDLED
 
 
+@pytest.mark.parametrize(
+    "breakage", ["no-ref-txt", "no-ref-wav", "undecodable-ref-txt", "ref-txt-is-a-dir"]
+)
+def test_broken_voice_dir_is_not_listed(tmp_path: Path, breakage: str) -> None:
+    """M28: a voice.toml alone does not make a usable voice."""
+    repo = installed(tmp_path)
+    broken = tmp_path / "voices" / "broken"
+    broken.mkdir()
+    (broken / "voice.toml").write_text('format = 1\nname = "broken"\n')
+    (broken / "ref.wav").write_bytes(b"RIFF")
+    (broken / "ref.txt").write_text("ok", encoding="utf-8")
+    match breakage:
+        case "no-ref-txt":
+            (broken / "ref.txt").unlink()
+        case "no-ref-wav":
+            (broken / "ref.wav").unlink()
+        case "undecodable-ref-txt":
+            (broken / "ref.txt").write_bytes(b"\xff\xfe\xfa")
+        case _:
+            (broken / "ref.txt").unlink()
+            (broken / "ref.txt").mkdir()
+    assert repo.names() == BUNDLED
+    with pytest.raises(UnknownVoice):
+        repo.ref("broken")
+
+
+def test_complete_custom_voice_is_listed(tmp_path: Path) -> None:
+    repo = installed(tmp_path)
+    voice = tmp_path / "voices" / "mine"
+    voice.mkdir()
+    for name, data in (("voice.toml", b"format = 1\n"), ("ref.wav", b"RIFF"), ("ref.txt", b"hi")):
+        (voice / name).write_bytes(data)
+    assert "mine" in repo.names()
+    assert repo.ref("mine").ref_text == "hi"
+
+
+def test_ref_text_broken_after_listing_is_unknown_voice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The race: names() saw a usable voice, then its ref.txt vanished before ref() read it."""
+    repo = installed(tmp_path)
+
+    def listed_anyway(voice_dir: Path) -> bool:
+        return True
+
+    monkeypatch.setattr(voices_fs, "_usable", listed_anyway)
+    (tmp_path / "voices" / "m1-calm" / "ref.txt").unlink()
+    with pytest.raises(UnknownVoice) as info:
+        repo.ref("m1-calm")
+    assert info.value.name == "m1-calm"
+
+
 def test_install_bundled_never_overwrites_edited_text(tmp_path: Path) -> None:
     repo = installed(tmp_path)
     edited = tmp_path / "voices" / "f1-warm" / "ref.txt"

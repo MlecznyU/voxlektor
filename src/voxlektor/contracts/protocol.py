@@ -14,7 +14,8 @@ MAX_FRAME = 1 << 20  # the whole line INCLUDING its terminating newline is at mo
 
 
 class ErrorCode(StrEnum):
-    """Closed set of error codes; a new code needs a new protocol version."""
+    """Error codes of v1; new codes may be added within v1; clients treat unknown codes as
+    ``internal``."""
 
     bad_frame = "bad_frame"
     bad_version = "bad_version"
@@ -46,6 +47,8 @@ class SpeakRequest(_Request, tag="speak"):
     lang: WireLang | None = None
     rate: float | None = None
     now: bool = False
+    # Added within v1 (P1): last, so positional construction of this class is unchanged.
+    base_lang: Literal["pl", "en"] | None = None  # tie fallback of `auto` detection
 
 
 class PauseRequest(_Request, tag="pause"):

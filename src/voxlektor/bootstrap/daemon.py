@@ -26,6 +26,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+import msgspec
+
 from voxlektor.adapters.audio.dsp import time_stretch
 from voxlektor.adapters.audio.memory_out import MemoryCuePlayer, MemoryOutput
 from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
@@ -37,7 +39,7 @@ from voxlektor.app.voices import VoiceCatalog
 from voxlektor.bootstrap.platform_select import select_platform
 from voxlektor.bootstrap.registry import load_engine
 from voxlektor.contracts.codec import ProtocolError, decode_request, encode_line
-from voxlektor.contracts.protocol import ErrorCode
+from voxlektor.contracts.protocol import ErrorCode, Reply, ReplyError
 from voxlektor.domain.settings import Settings
 from voxlektor.runtime.buffers import AudioBuffers
 from voxlektor.runtime.engine_worker import EngineWorker
@@ -47,6 +49,8 @@ _log = logging.getLogger(__name__)
 
 _OUTPUT_ENV = "VOXLEKTOR_OUTPUT"
 _VOICES_DIR = "voices"
+_MAX_ECHO_ID = 128  # chars of a request id echoed in an error reply
+_MAX_ERROR_MESSAGE = 1024  # chars of an error message (it may quote a command name or a value)
 
 type _FileId = tuple[int, int]  # (st_dev, st_ino)
 
@@ -106,12 +110,12 @@ class _Daemon:
             req = decode_request(line)
             req_id = req.id
             reply = await self.loop.handle(to_command(req))
-            return encode_line(to_wire_reply(req.id, reply))
+            return _encode(to_wire_reply(req.id, reply))
         except ProtocolError as err:
-            return encode_line(error_reply(err))
+            return _encode(error_reply(err))
         except Exception as exc:  # a bug; CoreLoop has logged it and is stopping
             internal = ProtocolError(ErrorCode.internal, f"internal error: {exc}", req_id)
-            return encode_line(error_reply(internal))
+            return _encode(error_reply(internal))
 
     def _on_ready(self) -> None:
         if self._socket_path is not None:
@@ -131,6 +135,33 @@ class _Daemon:
             and _holds_our_pid(self._pid_path)
         ):
             _unlink_if_same(self._pid_path, self._pid_id)
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _clipped(reply: Reply) -> Reply:
+    """An error reply whose echoed id and message are short (they may echo client input)."""
+    rid = None if reply.id is None else _clip(reply.id, _MAX_ECHO_ID)
+    error = reply.error
+    if error is not None:
+        error = ReplyError(error.code, _clip(error.message, _MAX_ERROR_MESSAGE))
+    return msgspec.structs.replace(reply, id=rid, error=error)
+
+
+def _encode(reply: Reply) -> bytes:
+    """Encode a reply; an error reply never exceeds ``MAX_FRAME``, whatever the client sent.
+
+    Error replies are clipped first (an id or a command name of ~1 MiB is echoed otherwise); an
+    ok reply that is too large (its id is) becomes a clipped ``bad_frame`` error reply.
+    """
+    if not reply.ok:
+        reply = _clipped(reply)
+    try:
+        return encode_line(reply)
+    except ProtocolError as err:
+        return encode_line(_clipped(error_reply(ProtocolError(err.code, err.message, reply.id))))
 
 
 def _run_all(steps: list[tuple[str, Callable[[], None]]]) -> None:

@@ -191,7 +191,8 @@ class Session:
             return Reply(ok=False, data={}, error=InvalidSetting(message))
         lang = cmd.lang if cmd.lang is not None else self._settings.lang
         epoch = Epoch(self._epoch + 1) if cmd.now else self._epoch
-        plan = plan_reading(cmd.text, lang, self._settings.base_lang, rate, epoch, self._next_id)
+        base_lang = cmd.base_lang or self._settings.base_lang
+        plan = plan_reading(cmd.text, lang, base_lang, rate, epoch, self._next_id)
         if not plan:
             return _ok(chunks=0)
         if cmd.now:
@@ -411,6 +412,7 @@ class Session:
         self._metrics = _Metrics(started_at=self._clock.now())
         self._gen_failures.clear()
         self._prompt_failures.clear()
+        self._last_error = None  # status reports the failure of the latest reading only
 
     def _take_result(self, epoch: Epoch, chunk: ChunkId) -> bool:
         """True when a result for ``chunk`` is wanted; forget a discarded chunk either way."""

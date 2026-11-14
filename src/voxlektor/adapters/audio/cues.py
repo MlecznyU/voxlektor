@@ -7,7 +7,9 @@ generated soft tone; STOPPED is the bundled clip ``bundled_cues/stopped_en.wav``
 
 Threads: ``play``/``close`` run on the loop thread; the stream callback (PortAudio thread) only
 reads its own buffer. The stream of the last cue stays open until the next cue or ``close()``
-(PortAudio forbids closing a stream from its own callback).
+(PortAudio forbids closing a stream from its own callback), or until ``portaudio.refresh_devices``
+asks for it once it has stopped (``release_idle_stream``): the cue player never holds a stream
+across a PortAudio re-initialisation, and a cue still sounding postpones the re-initialisation.
 
 The device-less ``MemoryCuePlayer`` lives in ``memory_out`` (no audio library imports).
 """
@@ -21,6 +23,7 @@ import numpy.typing as npt
 import sounddevice as sd
 import soundfile as sf
 
+from voxlektor.adapters.audio import portaudio
 from voxlektor.app.effects import Cue
 
 _log = logging.getLogger(__name__)
@@ -43,6 +46,14 @@ class SoundDeviceCuePlayer:
         if clip is not None:
             self._sounds[Cue.STOPPED] = clip
         self._stream: sd.OutputStream | None = None
+        portaudio.register(self)
+
+    def release_idle_stream(self) -> bool:
+        """``portaudio.StreamOwner``: close the last cue's stream once it has stopped playing."""
+        if self._stream is not None and self._stream.active:
+            return False
+        self.close()
+        return True
 
     def play(self, cue: Cue) -> None:
         try:
@@ -67,6 +78,7 @@ class SoundDeviceCuePlayer:
             return
         samples, rate = sound
         self.close()
+        portaudio.refresh_devices(idle=False)  # after a playback failure: the current device
         position = 0
 
         def callback(

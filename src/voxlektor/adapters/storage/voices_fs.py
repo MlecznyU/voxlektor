@@ -22,15 +22,21 @@ class FsVoiceRepository:
         self._root = root
 
     def names(self) -> list[str]:
+        """Usable voices only: a directory with all three files and a UTF-8 ``ref.txt``.
+
+        A broken voice directory is not listed, so naming it is ``unknown_voice`` rather than an
+        I/O error in the daemon.
+        """
         if not self._root.is_dir():
             return []
-        return sorted(
-            entry.name for entry in self._root.iterdir() if (entry / voicefmt.META).is_file()
-        )
+        return sorted(entry.name for entry in self._root.iterdir() if _usable(entry))
 
     def ref(self, name: str) -> VoiceRef:
         voice_dir = self._voice_dir(name)
-        text = (voice_dir / voicefmt.REF_TXT).read_text(encoding="utf-8")
+        try:
+            text = _ref_text(voice_dir)
+        except (OSError, UnicodeDecodeError):  # broken after names() looked at it
+            raise UnknownVoice(name, tuple(self.names())) from None
         return VoiceRef(name=name, ref_wav=voice_dir / voicefmt.REF_WAV, ref_text=text)
 
     def read_cache(self, name: str, key: str) -> bytes | None:
@@ -74,6 +80,21 @@ class FsVoiceRepository:
         if not key or key.startswith(".") or Path(key).name != key:
             raise ValueError(f"invalid cache key {key!r}")
         return self._voice_dir(name) / voicefmt.CACHE_DIR / key
+
+
+def _ref_text(voice_dir: Path) -> str:
+    return (voice_dir / voicefmt.REF_TXT).read_text(encoding="utf-8")
+
+
+def _usable(voice_dir: Path) -> bool:
+    files = (voicefmt.META, voicefmt.REF_WAV, voicefmt.REF_TXT)
+    if not all((voice_dir / name).is_file() for name in files):
+        return False
+    try:
+        _ref_text(voice_dir)
+    except (OSError, UnicodeDecodeError):
+        return False
+    return True
 
 
 def _install_file(item: Traversable, destination: Path) -> None:

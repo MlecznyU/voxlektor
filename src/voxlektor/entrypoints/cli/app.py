@@ -6,7 +6,8 @@ stdin when it is not a terminal, otherwise print the help; ``vxl config`` alone 
 config help. On the ``say`` path a word that starts with ``-`` but is no ``say`` option (``vxl
 -5 degrees``) is rejected with a hint to use ``vxl -- <text>``.
 
-Exit codes: 0 ok, 1 user error (bad input, a ``DomainError``), 2 service unavailable,
+Exit codes: 0 ok, 1 user error (bad input, a ``DomainError``), 2 service unavailable (also a
+local ``OSError`` such as a full or read-only disk: message on stderr, no traceback),
 3 unsupported platform (see ``output`` for how error replies map), 130 interrupted (Ctrl+C;
 typer turns ``KeyboardInterrupt`` into this code). Usage errors are 1, not click's 2, which
 here means "service unavailable".
@@ -125,4 +126,7 @@ def _run(args: list[str]) -> int:
     except ProtocolError as err:  # a request the protocol cannot carry, e.g. too long
         print(err.message, file=sys.stderr)
         return output.EXIT_USER
+    except OSError as err:  # local I/O: log file, voice install on a full or read-only disk, ...
+        print(f"voxlektor: {err}", file=sys.stderr)
+        return output.EXIT_UNAVAILABLE
     return result if isinstance(result, int) else output.EXIT_OK

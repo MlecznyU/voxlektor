@@ -10,6 +10,10 @@ Failures: nobody listening on ``path`` (missing, ``ECONNREFUSED``, not a socket)
 closed early, an undecodable, oversized or foreign reply, other socket errors) is a plain
 ``ServiceUnavailable``: something may be alive there. A request larger than ``MAX_FRAME`` is
 refused before connecting with ``ProtocolError(bad_frame)``.
+
+``probe`` asks whatever listens on ``path`` for its status and answers in three states: ``None``
+(nobody listens: a leftover file at most), ``True`` (a daemon answered ``status`` with ok),
+``False`` (something listens but is not ready, e.g. shutting down, or answers oddly).
 """
 
 import errno
@@ -52,6 +56,17 @@ def request(path: Path, req: dict[str, object], timeout: float = 5.0) -> dict[st
     if reply.id not in (req_id, None):
         raise ServiceUnavailable(f"reply from {path} belongs to another request")
     return msgspec.to_builtins(reply)
+
+
+def probe(path: Path, timeout: float = 1.0) -> bool | None:
+    """``None``: nobody listens; ``True``: a daemon is ready; ``False``: alive but not ready."""
+    try:
+        reply = request(path, {"cmd": "status"}, timeout)
+    except NotRunning:  # ENOENT, ECONNREFUSED, ENOTSOCK (_NO_LISTENER)
+        return None
+    except ServiceUnavailable:
+        return False
+    return reply.get("ok") is True
 
 
 def _exchange(path: Path, line: bytes, deadline: float) -> bytes:

@@ -1,4 +1,4 @@
-"""Every production module must be listed in the section 2 map of docs/architecture.md."""
+"""The section 2 map of docs/architecture.md and the package tree match, in both directions."""
 
 import re
 from pathlib import Path
@@ -41,13 +41,33 @@ def documented_modules(text: str) -> set[str]:
 
 def test_every_module_is_in_architecture_map() -> None:
     documented = documented_modules(ARCHITECTURE.read_text())
-    actual = {
+    missing = sorted(_actual_modules() - documented)
+    assert not missing, f"modules missing from docs/architecture.md section 2: {missing}"
+
+
+# Modules the section 2 code block may name before they exist (a later phase). Keep it explicit:
+# the Phase 3 modules are listed in prose below the block, so today nothing is needed here.
+LATER_PHASE: frozenset[str] = frozenset()
+
+
+def _actual_modules(*, packages: bool = False) -> set[str]:
+    return {
         path.relative_to(PACKAGE).as_posix()
         for path in PACKAGE.rglob("*.py")
-        if path.name != "__init__.py"
+        if packages or path.name != "__init__.py"
     }
-    missing = sorted(actual - documented)
-    assert not missing, f"modules missing from docs/architecture.md section 2: {missing}"
+
+
+def test_every_documented_module_exists() -> None:
+    """M9: the map names no module that is gone (or that never was)."""
+    documented = documented_modules(ARCHITECTURE.read_text())
+    stale = sorted(documented - _actual_modules(packages=True) - LATER_PHASE)
+    assert not stale, f"docs/architecture.md section 2 lists modules that do not exist: {stale}"
+
+
+def test_stale_map_entry_would_be_detected() -> None:
+    text = "## 2. Tree\n\n```\n  testing/\n    protocol_fixtures.py  gone\n```\n"
+    assert documented_modules(text) - _actual_modules() == {"testing/protocol_fixtures.py"}
 
 
 def test_parser_understands_the_map_notation() -> None:

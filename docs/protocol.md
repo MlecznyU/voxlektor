@@ -24,7 +24,7 @@ by hand). Golden examples: `tests/contracts/protocol_v1/{requests,replies}.jsonl
 
 | cmd | arguments | reply `data` |
 |---|---|---|
-| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `rate?`, `now?` (default false; true replaces the current reading) | `{"chunks": N}`: number of planned chunks (0 for empty or whitespace-only text) |
+| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces the current reading) | `{"chunks": N}`: number of planned chunks (0 for empty or whitespace-only text) |
 | `pause` | none | `{}` |
 | `resume` | none | `{}` |
 | `skip` | none | `{}` |
@@ -102,7 +102,7 @@ protocol.
 | `underruns` | audio underruns since start |
 | `first_audio_s` | seconds from the request to the first audio of the latest reading, `null` if none |
 | `chunks`, `gen_seconds`, `audio_seconds` | metrics of the latest reading |
-| `last_error` | message of the latest engine or audio failure, `null` if none |
+| `last_error` | message of the engine or audio failure that stopped the latest reading, `null` if none; cleared when a new reading starts from idle |
 | `caps` | wire command names this daemon supports (sorted) |
 
 ### caps

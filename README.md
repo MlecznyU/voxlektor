@@ -64,7 +64,9 @@ Bundled voices: `v0-default`, `f1-warm`, `f2-narrator`, `f3-bright`, `m1-calm`, 
 
 Precedence: command-line flag > environment variable > `config.toml` > default. The file lives
 in `~/.config/voxlektor/config.toml`; `vxl config voice NAME` writes it, and `vxl config show`
-prints what is in effect.
+prints what is in effect. `voice`, `lang`, `base_lang` and `rate` travel with every request, so a
+change applies to the next reading of a running daemon. `engine`, `history` and
+`service.idle_timeout` are read when the daemon starts (`vxl idle` changes the timeout live).
 
 ```toml
 config_version = 1

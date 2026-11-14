@@ -50,6 +50,33 @@ def test_import_linter_catches_stdlib_violation(tmp_path: Path) -> None:
     assert "Domain is pure and synchronous BROKEN" in result.stdout
 
 
+def _append(module: Path, line: str) -> None:
+    module.write_text(module.read_text(encoding="utf-8") + f"\n{line}\n", encoding="utf-8")
+
+
+def test_k1_ignore_stays_narrow(tmp_path: Path) -> None:
+    """The K1 ignores cover bootstrap.daemon -> adapters.audio.*, never the audio library itself."""
+    project = _copy_project(tmp_path)
+    assert _lint_imports(project).returncode == 0
+    _append(project / "src" / "voxlektor" / "bootstrap" / "daemon.py", "import sounddevice")
+    result = _lint_imports(project)
+    assert result.returncode != 0, result.stdout
+    assert "Audio libs only in audio adapters BROKEN" in result.stdout
+
+
+def test_cli_ignores_stay_narrow(tmp_path: Path) -> None:
+    """The CLI ignores are three exact edges; a new path to the audio adapters still breaks."""
+    project = _copy_project(tmp_path)
+    assert _lint_imports(project).returncode == 0
+    _append(
+        project / "src" / "voxlektor" / "bootstrap" / "client.py",
+        "from voxlektor.adapters.audio import dsp",
+    )
+    result = _lint_imports(project)
+    assert result.returncode != 0, result.stdout
+    assert "CLI control path is lightweight BROKEN" in result.stdout
+
+
 def test_ruff_bans_threading_in_domain(tmp_path: Path) -> None:
     """Second line of defence: Ruff TID251 rejects the same stdlib imports."""
     project = _copy_project(tmp_path)

@@ -137,3 +137,50 @@ def test_protocol_errors_come_back_as_error_replies(daemon: _Running) -> None:
     assert voice.error.code is p.ErrorCode.unknown_voice
     assert "v0-default" in voice.error.message
     assert request(daemon.socket, _line("status")).ok  # the daemon still serves
+
+
+_HUGE = "x" * (p.MAX_FRAME - 200)  # fits in one request frame, never twice in a reply
+
+
+@pytest.mark.parametrize(
+    ("line", "code"),
+    [
+        (f'{{"v":1,"id":"{_HUGE}","cmd":"dance"}}\n', p.ErrorCode.unknown_command),
+        (f'{{"v":1,"id":"1","cmd":"{_HUGE}"}}\n', p.ErrorCode.unknown_command),
+        (f'{{"v":"{_HUGE}","id":"1","cmd":"status"}}\n', p.ErrorCode.bad_version),
+        (f'{{"v":1,"id":"{_HUGE}","cmd":"speak","text":"hi","voice":"x"}}\n', None),
+        (f'{{"v":1,"id":"{_HUGE}","cmd":"status"}}\n', p.ErrorCode.bad_frame),
+    ],
+    ids=["id", "cmd", "version", "unknown-voice", "ok-reply"],
+)
+def test_error_replies_with_a_huge_echo_stay_within_max_frame(
+    daemon: _Running, line: str, code: p.ErrorCode | None
+) -> None:
+    """S5: a ~1 MiB id or command name is clipped in the error reply, never an oversize frame."""
+    reply = request(daemon.socket, line.encode())
+    assert reply.ok is False
+    assert reply.error is not None
+    assert reply.error.code is (code or p.ErrorCode.unknown_voice)
+    assert reply.id is None or len(reply.id) <= 131  # 128 chars + "..."
+    assert len(reply.error.message) <= 1027
+    assert request(daemon.socket, _line("status")).ok  # the daemon still serves
+
+
+@pytest.mark.parametrize("ref_txt", [None, b"\xff\xfe\xfa"], ids=["missing", "undecodable"])
+def test_broken_voice_dir_is_unknown_voice_and_the_daemon_survives(
+    daemon: _Running, ref_txt: bytes | None
+) -> None:
+    """M28: a voice.toml without a usable ref.txt never reaches the engine path."""
+    broken = daemon.platform.config_dir() / "voices" / "broken"
+    broken.mkdir()
+    (broken / "voice.toml").write_text('format = 1\nname = "broken"\n')
+    (broken / "ref.wav").write_bytes(b"RIFF")
+    if ref_txt is not None:
+        (broken / "ref.txt").write_bytes(ref_txt)
+    reply = request(daemon.socket, _line("speak", text="hello", voice="broken"))
+    assert reply.error is not None
+    assert reply.error.code is p.ErrorCode.unknown_voice
+    assert "broken" not in reply.error.message.split("available:", 1)[1]
+    status = request(daemon.socket, _line("status"))
+    assert status.ok
+    assert daemon.thread.is_alive()

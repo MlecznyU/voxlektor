@@ -223,14 +223,45 @@ def test_gives_up_after_wait_s_pinging_every_tenth_of_a_second(
     assert 0.99 <= sum(fake_clock) <= 1.11  # up to wait_s, plus float rounding of 0.1 steps
 
 
-def test_keeps_pinging_when_the_spawned_serve_exits_early(
+def test_serve_exiting_early_twice_is_spawned_again(
     platform: MacOSPlatform, monkeypatch: pytest.MonkeyPatch, fake_clock: list[float]
 ) -> None:
-    """Ruling R33: an old daemon still shutting down makes the new serve exit 1 after ~5 s."""
+    """C3: autostart right after a slow shutdown; the third serve comes up."""
+    exited: list[int] = []  # spawn index of every child that has exited
+
+    def popen(args: list[str], **kwargs: object) -> _Spawned:
+        child = _Spawned()
+        child.calls.append((args, kwargs))
+        index = len(spawned)
+        spawned.append(child)
+        if index < 2:  # the first two have exited ("already running") by the next poll
+            child.returncode = 1
+            exited.append(index)
+        return child
+
+    spawned: list[_Spawned] = []
+    monkeypatch.setattr(spawn.subprocess, "Popen", popen)
+    pings = iter([False] * 10 + [True])  # the third serve answers after ~1 s
+    ensure_daemon(platform, lambda: next(pings))
+    assert len(spawned) == 3
+    assert exited == [0, 1]
+    assert all(c.calls[0][0] == [sys.executable, "-m", "voxlektor", "serve"] for c in spawned)
+
+
+def test_spawns_are_bounded_to_three(
+    platform: MacOSPlatform, monkeypatch: pytest.MonkeyPatch, fake_clock: list[float]
+) -> None:
     spawned = _fake_popen(monkeypatch)
-    spawned.returncode = 1  # "already running"
-    answers = [False] * 60 + [True]  # the old daemon's successor answers after ~6 s
-    pings = iter(answers)
+    spawned.returncode = 1  # every serve exits at once
+    with pytest.raises(ServiceUnavailable, match="did not start"):
+        ensure_daemon(platform, lambda: False, wait_s=2.0)
+    assert len(spawned.calls) == 3
+
+
+def test_running_child_is_not_spawned_again(
+    platform: MacOSPlatform, monkeypatch: pytest.MonkeyPatch, fake_clock: list[float]
+) -> None:
+    spawned = _fake_popen(monkeypatch)  # returncode None: still starting
+    pings = iter([False] * 30 + [True])
     ensure_daemon(platform, lambda: next(pings))
     assert len(spawned.calls) == 1
-    assert len(fake_clock) == 59

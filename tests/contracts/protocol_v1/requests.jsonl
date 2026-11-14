@@ -1,5 +1,6 @@
 {"cmd":"speak","v":1,"id":"r1","text":"Hello world."}
 {"cmd":"speak","v":1,"id":"r2","text":"Good morning.","voice":"m1-calm","lang":"en","rate":1.25,"now":true}
+{"cmd":"speak","v":1,"id":"r13","text":"npm run dev","lang":"auto","base_lang":"en"}
 {"cmd":"pause","v":1,"id":"r3"}
 {"cmd":"resume","v":1,"id":"r4"}
 {"cmd":"skip","v":1,"id":"r5"}

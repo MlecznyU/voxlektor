@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash): the owner commits, and only the owner approves API changes.
+#
+# This guard is a process rail, not a security boundary: it catches the usual spellings of
+# state-changing git commands and snapshot approvals so an agent stops and reports instead. A
+# determined caller can always get around a regex (aliases, scripts, other interpreters); the
+# real protection is review by the owner, who commits.
 set -euo pipefail
 
 cmd="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("command",""))')"
 
-git_re='(^|[^[:alnum:]_-])git([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+((commit|push|reset|stash|rebase)([^[:alnum:]_-]|$)|checkout([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+--([^[:alnum:]_-]|$))'
+# Blocked: commit, push, reset, stash, rebase, restore, clean; `checkout ... --`; and
+# `checkout`/`switch` with -f / --force / --discard-changes (also in a short-flag cluster: -fb).
+git_re='(^|[^[:alnum:]_-])git([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+((commit|push|reset|stash|rebase|restore|clean)([^[:alnum:]_-]|$)|(checkout|switch)([[:space:]]+[^;&|[:space:]]+)*[[:space:]]+(--|--force|--discard-changes|-[[:alpha:]]*f[[:alpha:]]*)([^[:alnum:]_-]|$))'
 if [[ "$cmd" =~ $git_re ]]; then
   echo "the owner commits — report instead" >&2
   exit 2

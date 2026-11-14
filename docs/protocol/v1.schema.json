@@ -23,7 +23,7 @@
       "type": "object"
     },
     "ErrorCode": {
-      "description": "Closed set of error codes; a new code needs a new protocol version.",
+      "description": "Error codes of v1; new codes may be added within v1; clients treat unknown codes as\n    ``internal``.",
       "enum": [
         "audio_failed",
         "bad_frame",
@@ -243,6 +243,20 @@
     },
     "SpeakRequest": {
       "properties": {
+        "base_lang": {
+          "anyOf": [
+            {
+              "enum": [
+                "en",
+                "pl"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cmd": {
           "enum": [
             "speak"

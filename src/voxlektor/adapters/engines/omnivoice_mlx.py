@@ -14,6 +14,7 @@ import mlx.core as mx
 import numpy as np
 import numpy.typing as npt
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import LocalEntryNotFoundError
 from mlx_audio.tts.models.omnivoice.utils import create_voice_clone_prompt
 from mlx_audio.tts.utils import load_model
 
@@ -66,8 +67,7 @@ class OmniVoiceEngine:
     def load(self) -> None:
         if self._model is not None:
             return
-        local_path = snapshot_download(REPO, revision=OMNIVOICE_REVISION)
-        self._model = load_model(Path(local_path))
+        self._model = load_model(Path(_model_path()))
 
     def unload(self) -> None:
         self._model = None
@@ -129,6 +129,14 @@ class OmniVoiceEngine:
         if self._model is None:
             raise RuntimeError("engine not loaded")
         return self._model
+
+
+def _model_path() -> str:
+    """The pinned snapshot, offline first: the Hub is contacted only on a cache miss."""
+    try:
+        return snapshot_download(REPO, revision=OMNIVOICE_REVISION, local_files_only=True)
+    except LocalEntryNotFoundError:
+        return snapshot_download(REPO, revision=OMNIVOICE_REVISION)
 
 
 def _omni_prompt(p: VoicePrompt) -> _OmniPrompt:

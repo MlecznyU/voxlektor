@@ -38,7 +38,7 @@ from voxlektor.app.voices import VoiceCatalog
 from voxlektor.contracts.engine import VoiceRef
 from voxlektor.domain.reading import Chunk
 from voxlektor.domain.settings import Settings
-from voxlektor.domain.types import ChunkId, EngineId, Epoch, LangPref
+from voxlektor.domain.types import ChunkId, EngineId, Epoch, Lang, LangPref
 from voxlektor.testing.fakes import FakeClock, FakeEngine, InMemoryVoiceRepository, MemoryOutput
 from voxlektor.testing.simulator import SimulationError, Simulator
 
@@ -389,6 +389,29 @@ def test_generation_failure_stops_reading_and_session_stays_usable() -> None:
     sim.handle(_speak(_text("fine")))
     assert _played_tags(sim) == ["a", "fine"]
     assert sim.status()["state"] == "warm"
+
+
+def test_new_reading_from_idle_clears_last_error() -> None:
+    """C5: status.last_error describes the latest reading only."""
+    sim = _sim(fail_on="BOOM")
+    sim.handle(_speak(_text("BOOM")))
+    assert sim.status()["last_error"] == FAKE_FAILURE
+    sim.handle(_speak("   "))  # an empty plan starts no reading
+    assert sim.status()["last_error"] == FAKE_FAILURE
+    sim.handle(_speak(_text("fine")))
+    assert sim.status()["last_error"] is None
+
+
+@pytest.mark.parametrize(
+    ("base_lang", "expected"), [(None, "pl"), ("en", "en"), ("pl", "pl")], ids=str
+)
+def test_request_base_lang_breaks_auto_detection_ties(
+    base_lang: Lang | None, expected: Lang
+) -> None:
+    """P1: a request's base_lang wins over Settings.base_lang ("pl" here)."""
+    sim = _sim()
+    sim.handle(Speak("npm run dev", None, "auto", None, False, base_lang=base_lang))
+    assert [g.chunk.lang for g in _of(sim, Generate)] == [expected]
 
 
 def test_generation_failing_once_is_retried() -> None:

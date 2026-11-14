@@ -84,8 +84,6 @@ banned-module-level-imports = ["numpy", "mlx", "mlx_audio", "sounddevice", "soun
 "src/voxlektor/runtime/**" = ["TID251"]
 "src/voxlektor/adapters/**" = ["TID251", "TID253"]
 "src/voxlektor/entrypoints/**" = ["TID251"]
-"src/voxlektor/runtime/buffers.py" = ["TID253"]
-"src/voxlektor/contracts/engine.py" = ["TID253"]
 "src/voxlektor/testing/**" = ["TID251", "TID253"]
 "tests/**" = ["TID251", "TID253", "S101", "PLR2004"]
 "scripts/**" = ["TID251", "TID253", "S101", "ANN401"]
@@ -158,8 +156,6 @@ forbidden_modules = ["numpy", "voxlektor.domain", "voxlektor.contracts.engine", 
 name = "Contracts are mutually independent"
 type = "independence"
 modules = ["voxlektor.contracts.protocol", "voxlektor.contracts.engine", "voxlektor.contracts.voicefmt"]
-ignore_imports = ["voxlektor.contracts.codec -> voxlektor.contracts.protocol"]
-unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Runtime is technology-agnostic"

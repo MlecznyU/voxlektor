@@ -9,9 +9,10 @@ Order:
    1 at once; otherwise the holder is starting up or shutting down, so retry the lock every
    50 ms for up to 5 s (a shutting-down daemon frees it once its worker has finished), then
    print ``already running`` and exit 1.
-3. With the lock held, probe the socket: any decodable reply (or a listener that does not
-   answer) means something is alive -> ``already running``, exit 1. Only "no listener"
-   (``ENOENT``, ``ECONNREFUSED``, not a socket) means stale: the file is removed.
+3. With the lock held, probe the socket (``adapters.transport.unix_client.probe``): any reply
+   (or a listener that does not answer) means something is alive -> ``already running``, exit 1.
+   Only "no listener" (``ENOENT``, ``ECONNREFUSED``, not a socket) means stale: the file is
+   removed.
 4. Log to the platform's rotating log (1 MB x 2) and run the daemon (it writes the pid file once
    the socket listens and removes only its own socket and pid file when it stops). SIGTERM and
    SIGINT shut it down gracefully, like a ``shutdown`` request.
@@ -22,27 +23,23 @@ Exit codes: 0 clean stop, 1 already running, 2 the daemon failed (service unavai
 
 import asyncio
 import contextlib
-import enum
-import errno
 import fcntl
 import logging
 import logging.handlers
 import os
 import platform as host
 import signal
-import socket
 import sys
 import threading
 import time
 from collections.abc import Generator
 from pathlib import Path
 
+from voxlektor.adapters.transport.unix_client import probe
 from voxlektor.app.commands import Shutdown
 from voxlektor.app.effects import Reply
 from voxlektor.bootstrap.daemon import Daemon, build_daemon
 from voxlektor.bootstrap.platform_select import select_platform
-from voxlektor.contracts import protocol as p
-from voxlektor.contracts.codec import ProtocolError, decode_reply, encode_line
 from voxlektor.domain.errors import PlatformError
 from voxlektor.domain.settings import Settings
 
@@ -59,13 +56,6 @@ _LOG_BYTES = 1_000_000
 _LOG_BACKUPS = 2
 _PROBE_TIMEOUT_S = 1.0
 _STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
-_NO_LISTENER = frozenset({errno.ENOENT, errno.ECONNREFUSED, errno.ENOTSOCK})
-
-
-class _Probe(enum.Enum):
-    NONE = enum.auto()  # nothing listens on the socket path: a leftover file at most
-    READY = enum.auto()  # a daemon answered status with ok
-    BUSY = enum.auto()  # something listens but is not ready (e.g. shutting down)
 
 
 def serve(settings: Settings) -> int:
@@ -78,7 +68,7 @@ def serve(settings: Settings) -> int:
         print(err.message, file=sys.stderr)
         return _EXIT_UNSUPPORTED
     with _single_instance(lock_path, socket_path) as owned:
-        if not owned or _probe(socket_path) is not _Probe.NONE:
+        if not owned or probe(socket_path, _PROBE_TIMEOUT_S) is not None:
             print("already running")
             return _EXIT_ALREADY_RUNNING
         socket_path.unlink(missing_ok=True)  # stale: nobody listens on it
@@ -138,28 +128,9 @@ def _take_lock(fd: int, socket_path: Path) -> bool:
             pass
         else:
             return True
-        if _probe(socket_path) is _Probe.READY or time.monotonic() >= deadline:
+        if probe(socket_path, _PROBE_TIMEOUT_S) is True or time.monotonic() >= deadline:
             return False
         time.sleep(_LOCK_RETRY_S)  # the holder is starting up or shutting down
-
-
-def _probe(path: Path) -> _Probe:
-    """Ask whatever listens on ``path`` for its status."""
-    request = encode_line(p.StatusRequest(v=p.PROTOCOL_VERSION, id="serve-probe"))
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(_PROBE_TIMEOUT_S)
-            sock.connect(str(path))
-            sock.sendall(request)
-            with sock.makefile("rb") as stream:
-                line = stream.readline(p.MAX_FRAME)
-    except OSError as exc:
-        return _Probe.NONE if exc.errno in _NO_LISTENER else _Probe.BUSY
-    try:
-        reply = decode_reply(line)
-    except ProtocolError:
-        return _Probe.BUSY
-    return _Probe.READY if reply.ok else _Probe.BUSY
 
 
 @contextlib.contextmanager

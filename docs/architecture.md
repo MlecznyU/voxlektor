@@ -29,13 +29,13 @@ src/voxlektor/
   bundled_cues/stopped_en.wav the STOPPED cue; made once by scripts/make_cues.py (real OmniVoice)
 
   contracts/                  PUBLIC, VERSIONED
-    protocol.py               PROTOCOL_VERSION=1, MAX_FRAME, Request/Reply/Event (msgspec tagged unions), ErrorCode, Capability
+    protocol.py               PROTOCOL_VERSION=1, MAX_FRAME, Request/Reply/Event (msgspec tagged unions), ErrorCode
     codec.py                  encode_line / decode_request / decode_reply; ProtocolError(code)
-    engine.py                 ENGINE_API=1, Engine SPI, EngineSpec, VoiceRef, VoicePrompt, AudioChunk
+    engine.py                 ENGINE_API=1, Engine SPI, Capability, EngineSpec, VoiceRef, VoicePrompt, AudioChunk
     voicefmt.py               VOICE_FORMAT=1, VoiceMeta (voice.toml), file names, prompt_cache_name(), ref limits
 
   domain/                     PURE: sync, no I/O, no numpy
-    types.py                  NewType VoiceName/EngineId/ChunkId/Epoch; Lang; LangPref; Rate; Seconds
+    types.py                  NewType VoiceName/EngineId/ChunkId/Epoch; Lang; LangPref; Seconds
     errors.py                 DomainError with a stable `code`
     settings.py               Settings, merge_layers(), parse_duration()
     keepwarm.py               COLD/LOADING/WARM/UNLOADING; transition(state, event) -> (state, actions); time arrives in events
@@ -48,8 +48,8 @@ src/voxlektor/
   app/                        SYNC, no threads and no asyncio; ports only
     ports.py                  Clock, AudioOutput, CuePlayer, VoiceRepository, SettingsStore, PlatformInfo, EngineProvider
     commands.py               application commands (independent of the protocol version)
-    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit; Reply, Outcome
-    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded
+    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit, PlayCue(Cue); Reply, Outcome
+    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_prompt_failed/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded
     voice_prompts.py          get_or_build_prompt(): cache via VoiceRepository + Engine.serialize_prompt; fresh= rebuilds
     voices.py                 VoiceCatalog: list/resolve/ensure_bundled
 
@@ -65,13 +65,14 @@ src/voxlektor/
     audio/dsp.py              time_stretch() (pytsmod WSOLA)
     audio/memory_out.py       MemoryOutput + MemoryCuePlayer: device-less (VOXLEKTOR_OUTPUT=memory; also used by tests)
     audio/cues.py             SoundDeviceCuePlayer: own short stream per cue (RETRY tone, STOPPED clip); close() at stop
+    audio/portaudio.py        refresh_devices(): re-initialises PortAudio (follows the default output device) only while no stream is open
     storage/voices_fs.py      on-disk VoiceRepository per contracts.voicefmt; bundled voices via importlib.resources; atomic cache writes
     storage/settings_toml.py  SettingsStore: TOML + VOXLEKTOR_*
     platform/macos.py         paths (0700), hardware
     platform/unsupported.py   "platform not supported yet"
     transport/mapping.py      wire v1 <-> application commands (the ONLY place that knows both)
     transport/unix_server.py  asyncio server: frames (one line each, several per connection), MAX_FRAME, 0600
-    transport/unix_client.py  blocking client (no asyncio)
+    transport/unix_client.py  blocking client (no asyncio): request(), probe() (also used by `serve`)
     procs/spawn.py            daemon spawn (argv, start_new_session), stale regular file at the socket path
 
   bootstrap/
@@ -90,7 +91,6 @@ src/voxlektor/
     fakes.py                  FakeEngine, MemoryOutput, FakeClock, InMemoryVoiceRepository, InMemorySettings
     simulator.py              deterministic driver: Session + immediate worker + fake output
     engine_contract.py        suite that every engine passes
-    protocol_fixtures.py      golden JSONL fixtures
 ```
 Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{engines,doctor,render}.py`, `adapters/engines/voxcpm2_mlx.py`, `adapters/audio/wavfile.py`, `adapters/models/hf_hub.py`, `adapters/platform/linux.py`, `entrypoints/{render.py,cli/setup.py}`.
 
@@ -113,9 +113,9 @@ Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{
 
 | Contract | Source | Derived | Rules |
 |---|---|---|---|
-| **Socket protocol v1** | `contracts/protocol.py` + `codec.py` | `docs/protocol.md`, `docs/protocol/v1.schema.json` (generated; CI fails when out of date), `tests/contracts/protocol_v1/*.jsonl` | 1 JSON object per line, ≤ 1 MiB, `"v":1`; every request has an `id` echoed in the reply; errors `{"code","message"}` from a closed `ErrorCode`; events `{"v","event",…}` only after `subscribe`; in v1 changes are strictly additive, new commands advertised in `status.caps` |
+| **Socket protocol v1** | `contracts/protocol.py` + `codec.py` | `docs/protocol.md`, `docs/protocol/v1.schema.json` (generated; CI fails when out of date), `tests/contracts/protocol_v1/*.jsonl` | 1 JSON object per line, ≤ 1 MiB, `"v":1`; every request has an `id` echoed in the reply; errors `{"code","message"}` from `ErrorCode` (new codes may be added within v1; clients treat unknown codes as `internal`); events `{"v","event",…}` only after `subscribe`; in v1 changes are strictly additive, new commands advertised in `status.caps` |
 | **Engine SPI** | `contracts/engine.py` (`ENGINE_API=1`) + `voxlektor.engines` entry points | `testing/engine_contract.py` | `EngineSpec` (id, revision, sample_rate, languages, capabilities ⊆ {LIVE, RENDER, CLONE, DESIGN}); `load`, `unload`, `prepare_voice(VoiceRef) -> VoicePrompt`, `serialize_prompt`/`deserialize_prompt` (bytes + `prompt_format`), `synthesize(text, lang, prompt) -> Iterator[AudioChunk]`; engines do not touch the file system |
-| **Voice format** | `contracts/voicefmt.py` (`VOICE_FORMAT=1`) | `docs/voice-format.md` | `voices/<name>/ref.wav` (mono, ≤ 30 s), `ref.txt`, `voice.toml` = source of truth; `cache/<engine>-<rev8>-p<prompt_format>.bin` disposable; only `cache/` is ever deleted |
+| **Voice format** | `contracts/voicefmt.py` (`VOICE_FORMAT=1`) | none (the module is the reference) | `voices/<name>/ref.wav` (mono, ≤ 30 s), `ref.txt`, `voice.toml` = source of truth; `cache/<engine>-<rev8>-p<prompt_format>.bin` disposable; only `cache/` is ever deleted |
 | Config (semi-public) | `domain/settings.py` + `adapters/storage/settings_toml.py` | table in README | `config_version = 1`; unknown keys preserved on write |
 | CLI (semi-public) | `entrypoints/cli/app.py` | README | exit codes: 0 ok, 1 user error, 2 service unavailable, 3 unsupported platform, 130 interrupted (Ctrl+C) |
 
@@ -135,4 +135,4 @@ Detailed step-by-step guide: the `.claude/skills/voxlektor-architecture/SKILL.md
 
 `ruff check` + `ruff format --check` → `lint-imports` (contracts in `pyproject.toml`) → `pyright` (strict, `typings/` for `mlx_audio`, `sounddevice`, `soundfile`, `pytsmod`, `huggingface_hub`) → `pytest --cov` (branch; 100% for `domain`/`app`/`contracts`, ≥ 95% overall; excluded only `adapters/engines/*_mlx.py` and `adapters/audio/sounddevice_out.py`, covered by `-m model` / `-m audio`).
 
-**Stdlib guard (canary result, Task 0):** `import-linter` 2.16 sees stdlib modules, so `lint-imports` is the primary guard (`test_import_linter_catches_stdlib_violation`). Two limits: it rejects stdlib *submodules* (`logging.handlers`, `importlib.metadata`), so `importlib` is forbidden as a whole in `domain` and `app`, and `logging.handlers` is banned by Ruff TID251 (also asserted by `test_ruff_bans_threading_in_domain`). Contracts that name modules must find them, so empty placeholder modules existed for `contracts/{protocol,codec,engine,voicefmt}.py`, `entrypoints/oneshot.py` and `entrypoints/cli/speak.py` until their tasks filled them. For the same reason "Contracts are mutually independent" sets `unmatched_ignore_imports_alerting = "none"`. "CLI control path is lightweight" is back to `"error"` since Task 10; its three ignored edges are the lazy, path-specific imports (`cli.speak -> oneshot` for one-shot mode, `cli.control -> entrypoints.daemon` for `serve`) and the `TYPE_CHECKING`-only `contracts.engine -> numpy`; `test_cli_import_is_light` and `test_cli_status_run_is_light` check at run time that importing the CLI and running `status` load no numpy, MLX, audio library, asyncio or runtime. The third, "Audio libs only in audio adapters" (whose `bootstrap.daemon -> adapters.audio.*` wiring edges were added in Task 9), keeps the default alerting, so a stale ignore there fails `lint-imports`.
+**Stdlib guard (canary result, Task 0):** `import-linter` 2.16 sees stdlib modules, so `lint-imports` is the primary guard (`test_import_linter_catches_stdlib_violation`). Two limits: it rejects stdlib *submodules* (`logging.handlers`, `importlib.metadata`), so `importlib` is forbidden as a whole in `domain` and `app`, and `logging.handlers` is banned by Ruff TID251 (also asserted by `test_ruff_bans_threading_in_domain`). Contracts that name modules must find them, so empty placeholder modules existed for `contracts/{protocol,codec,engine,voicefmt}.py`, `entrypoints/oneshot.py` and `entrypoints/cli/speak.py` until their tasks filled them. "Contracts are mutually independent" has no ignored imports (`codec` is not one of its modules, so its import of `protocol` never needed one) and keeps the default alerting. "CLI control path is lightweight" is back to `"error"` since Task 10; its three ignored edges are the lazy, path-specific imports (`cli.speak -> oneshot` for one-shot mode, `cli.control -> entrypoints.daemon` for `serve`) and the `TYPE_CHECKING`-only `contracts.engine -> numpy`; `test_cli_import_is_light` and `test_cli_status_run_is_light` check at run time that importing the CLI and running `status` load no numpy, MLX, audio library, asyncio or runtime. The third, "Audio libs only in audio adapters" (whose `bootstrap.daemon -> adapters.audio.*` wiring edges were added in Task 9), keeps the default alerting, so a stale ignore there fails `lint-imports`.

@@ -12,7 +12,8 @@ import pytest
 import sounddevice as sd
 import soundfile as sf
 
-from voxlektor.adapters.audio import cues
+from tests.adapters.audio.conftest import Reinits
+from voxlektor.adapters.audio import cues, portaudio
 from voxlektor.adapters.audio.cues import SoundDeviceCuePlayer
 from voxlektor.adapters.audio.memory_out import MemoryCuePlayer
 from voxlektor.app.effects import Cue
@@ -31,11 +32,13 @@ class FakeStream:
         self.samplerate = samplerate
         self.callback = callback
         self.started = False
+        self.active = False  # sounding: started and not yet stopped by its callback
         self.closed = False
         FakeStream.instances.append(self)
 
     def start(self) -> None:
         self.started = True
+        self.active = True
 
     def abort(self, ignore_errors: bool = True) -> None:
         pass
@@ -52,6 +55,7 @@ class FakeStream:
             try:
                 self.callback(outdata, frames, None, sd.CallbackFlags())
             except sd.CallbackStop:
+                self.active = False
                 blocks.append(outdata[:, 0].copy())
                 return np.concatenate(blocks)
             blocks.append(outdata[:, 0].copy())
@@ -155,3 +159,35 @@ def test_a_missing_clip_is_logged_and_its_cue_is_skipped(
     assert FakeStream.instances == []
     assert "cannot load cue clip" in caplog.text
     assert "no sound for cue stopped" in caplog.text
+
+
+def _no_stream_open() -> None:
+    assert [s for s in FakeStream.instances if not s.closed] == [], "re-init with an open stream"
+
+
+def test_a_sounding_cue_postpones_a_re_initialisation(reinits: Reinits) -> None:
+    reinits.check = _no_stream_open
+    player = SoundDeviceCuePlayer()
+    player.play(Cue.RETRY)
+    stream = FakeStream.instances[0]
+    assert portaudio.refresh_devices(idle=True) is False  # the cue still sounds
+    assert reinits.count == 0
+    assert not stream.closed
+    stream.drain()
+    assert portaudio.refresh_devices(idle=True) is True  # stopped: released, then re-init
+    assert reinits.count == 1
+    assert stream.closed
+    player.close()  # nothing left: never closed twice
+
+
+def test_a_cue_after_a_playback_failure_opens_on_the_current_device(reinits: Reinits) -> None:
+    reinits.check = _no_stream_open
+    player = SoundDeviceCuePlayer()
+    player.play(Cue.RETRY)
+    FakeStream.instances[0].drain()
+    portaudio.mark_stale()  # the reading's output failed
+    player.play(Cue.STOPPED)
+    assert reinits.count == 1  # re-initialised before the STOPPED stream was opened
+    assert FakeStream.instances[-1].started
+    player.play(Cue.RETRY)
+    assert reinits.count == 1  # once

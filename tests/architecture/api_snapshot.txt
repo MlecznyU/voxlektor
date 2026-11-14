@@ -25,6 +25,7 @@ cli:vxl voices
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer() -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.close(self) -> None
 voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
+voxlektor.adapters.audio.cues:SoundDeviceCuePlayer.release_idle_stream(self) -> bool
 voxlektor.adapters.audio.dsp:time_stretch(samples: NDArray[numpy.float32], rate: float) -> NDArray[numpy.float32]
 voxlektor.adapters.audio.memory_out:MemoryCuePlayer() -> None
 voxlektor.adapters.audio.memory_out:MemoryCuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
@@ -39,6 +40,7 @@ voxlektor.adapters.audio.memory_out:MemoryOutput.start(self, chunk: voxlektor.do
 voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput() -> None
 voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.abort(self) -> None
 voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.pause(self) -> None
+voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.release_idle_stream(self) -> bool
 voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.resume(self) -> None
 voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.set_callbacks(self, on_done: collections.abc.Callable[[voxlektor.domain.types.ChunkId], None], on_failed: collections.abc.Callable[[voxlektor.domain.types.ChunkId, str], None]) -> None
 voxlektor.adapters.audio.sounddevice_out:SoundDeviceOutput.start(self, chunk: voxlektor.domain.types.ChunkId, samples: object, sample_rate: int) -> None
@@ -46,6 +48,7 @@ voxlektor.adapters.engines.omnivoice_mlx:LANGS = {'pl': 'polish', 'en': 'english
 voxlektor.adapters.engines.omnivoice_mlx:NUM_STEPS = 16
 voxlektor.adapters.engines.omnivoice_mlx:OMNIVOICE_REVISION = '8fb0b754cad788aaefec690cd55c207e8a628f85'
 voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine() -> None
+voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.PROMPT_FORMAT: int
 voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.deserialize_prompt(self, voice: str, data: bytes) -> voxlektor.contracts.engine.VoicePrompt
 voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.load(self) -> None
 voxlektor.adapters.engines.omnivoice_mlx:OmniVoiceEngine.prepare_voice(self, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
@@ -80,17 +83,19 @@ voxlektor.adapters.storage.voices_fs:FsVoiceRepository.write_cache(self, name: s
 voxlektor.adapters.transport.mapping:error_reply(err: voxlektor.contracts.codec.ProtocolError) -> voxlektor.contracts.protocol.Reply
 voxlektor.adapters.transport.mapping:to_command(req: Request) -> Command
 voxlektor.adapters.transport.mapping:to_wire_reply(req_id: str, reply: voxlektor.app.effects.Reply) -> voxlektor.contracts.protocol.Reply
+voxlektor.adapters.transport.unix_client:probe(path: pathlib.Path, timeout: float = 1.0) -> bool | None
 voxlektor.adapters.transport.unix_client:request(path: pathlib.Path, req: dict[str, object], timeout: float = 5.0) -> dict[str, object]
-voxlektor.adapters.transport.unix_server:serve_unix(path: pathlib.Path, handler: _Handler, *, on_ready: collections.abc.Callable[[], None] | None) -> asyncio.base_events.Server
+voxlektor.adapters.transport.unix_server:async serve_unix(path: pathlib.Path, handler: _Handler, *, on_ready: collections.abc.Callable[[], None] | None) -> asyncio.base_events.Server
 voxlektor.app.commands:Back() -> None
-voxlektor.app.commands:Command = Command
+voxlektor.app.commands:Command: TypeAlias = voxlektor.app.commands.Speak | voxlektor.app.commands.Pause | voxlektor.app.commands.Resume | voxlektor.app.commands.Skip | voxlektor.app.commands.Back | voxlektor.app.commands.StopReading | voxlektor.app.commands.Status | voxlektor.app.commands.SetIdle | voxlektor.app.commands.Unload | voxlektor.app.commands.Shutdown
 voxlektor.app.commands:Pause() -> None
 voxlektor.app.commands:Resume() -> None
 voxlektor.app.commands:SetIdle(timeout: str) -> None
 voxlektor.app.commands:SetIdle.timeout: str
 voxlektor.app.commands:Shutdown() -> None
 voxlektor.app.commands:Skip() -> None
-voxlektor.app.commands:Speak(text: str, voice: str | None, lang: Optional[Literal['auto', 'pl', 'en']], rate: float | None, now: bool) -> None
+voxlektor.app.commands:Speak(text: str, voice: str | None, lang: Optional[Literal['auto', 'pl', 'en']], rate: float | None, now: bool, *, base_lang: Optional[Literal['pl', 'en']] = None) -> None
+voxlektor.app.commands:Speak.base_lang: Optional[Literal['pl', 'en']]
 voxlektor.app.commands:Speak.lang: Optional[Literal['auto', 'pl', 'en']]
 voxlektor.app.commands:Speak.now: bool
 voxlektor.app.commands:Speak.rate: float | None
@@ -106,7 +111,7 @@ voxlektor.app.effects:Cue.RETRY = 'retry'
 voxlektor.app.effects:Cue.STOPPED = 'stopped'
 voxlektor.app.effects:DropAudio(chunks: tuple[voxlektor.domain.types.ChunkId, ...]) -> None
 voxlektor.app.effects:DropAudio.chunks: tuple[voxlektor.domain.types.ChunkId, ...]
-voxlektor.app.effects:Effect = Effect
+voxlektor.app.effects:Effect: TypeAlias = voxlektor.app.effects.LoadEngine | voxlektor.app.effects.UnloadEngine | voxlektor.app.effects.PrepareVoice | voxlektor.app.effects.Generate | voxlektor.app.effects.StartPlayback | voxlektor.app.effects.PausePlayback | voxlektor.app.effects.ResumePlayback | voxlektor.app.effects.AbortPlayback | voxlektor.app.effects.DropAudio | voxlektor.app.effects.ScheduleWake | voxlektor.app.effects.CancelWake | voxlektor.app.effects.Exit | voxlektor.app.effects.PlayCue
 voxlektor.app.effects:Exit() -> None
 voxlektor.app.effects:Generate(chunk: voxlektor.domain.reading.Chunk, voice: str) -> None
 voxlektor.app.effects:Generate.chunk: voxlektor.domain.reading.Chunk
@@ -143,6 +148,7 @@ voxlektor.app.ports:Clock.now(self) -> float
 voxlektor.app.ports:CuePlayer(*args, **kwargs)
 voxlektor.app.ports:CuePlayer.play(self, cue: voxlektor.app.effects.Cue) -> None
 voxlektor.app.ports:EngineProvider(*args, **kwargs)
+voxlektor.app.ports:EngineProvider.__call__(self, engine_id: str) -> voxlektor.contracts.engine.Engine
 voxlektor.app.ports:PlatformInfo(*args, **kwargs)
 voxlektor.app.ports:PlatformInfo.config_dir(self) -> pathlib.Path
 voxlektor.app.ports:PlatformInfo.log_path(self) -> pathlib.Path
@@ -186,7 +192,8 @@ voxlektor.bootstrap.client:ClientContext.settings: voxlektor.domain.settings.Set
 voxlektor.bootstrap.client:ClientContext.store: voxlektor.app.ports.SettingsStore
 voxlektor.bootstrap.client:build_client(flags: collections.abc.Mapping[str, object]) -> voxlektor.bootstrap.client.ClientContext
 voxlektor.bootstrap.daemon:Daemon(*args, **kwargs)
-voxlektor.bootstrap.daemon:Daemon.run(self) -> None
+voxlektor.bootstrap.daemon:Daemon.loop: voxlektor.runtime.loop.CoreLoop
+voxlektor.bootstrap.daemon:async Daemon.run(self) -> None
 voxlektor.bootstrap.daemon:build_daemon(settings: voxlektor.domain.settings.Settings, *, transport: bool, platform: voxlektor.app.ports.PlatformInfo | None = None, output: voxlektor.app.ports.AudioOutput | None = None, cues: voxlektor.app.ports.CuePlayer | None = None) -> voxlektor.bootstrap.daemon.Daemon
 voxlektor.bootstrap.environment:prepare() -> None
 voxlektor.bootstrap.platform_select:select_platform(sys_platform: str, machine: str, macos_version: str) -> voxlektor.app.ports.PlatformInfo
@@ -209,6 +216,7 @@ voxlektor.contracts.engine:Engine.deserialize_prompt(self, voice: str, data: byt
 voxlektor.contracts.engine:Engine.load(self) -> None
 voxlektor.contracts.engine:Engine.prepare_voice(self, ref: voxlektor.contracts.engine.VoiceRef) -> voxlektor.contracts.engine.VoicePrompt
 voxlektor.contracts.engine:Engine.serialize_prompt(self, p: voxlektor.contracts.engine.VoicePrompt) -> bytes
+voxlektor.contracts.engine:Engine.spec: voxlektor.contracts.engine.EngineSpec
 voxlektor.contracts.engine:Engine.synthesize(self, text: str, lang: str, prompt: voxlektor.contracts.engine.VoicePrompt) -> collections.abc.Iterator[voxlektor.contracts.engine.AudioChunk]
 voxlektor.contracts.engine:Engine.unload(self) -> None
 voxlektor.contracts.engine:EngineSpec(id: str, revision: str, prompt_format: int, sample_rate: int, langs: frozenset[str], capabilities: frozenset[voxlektor.contracts.engine.Capability]) -> None
@@ -226,9 +234,10 @@ voxlektor.contracts.engine:VoiceRef(name: str, ref_wav: pathlib.Path, ref_text: 
 voxlektor.contracts.engine:VoiceRef.name: str
 voxlektor.contracts.engine:VoiceRef.ref_text: str
 voxlektor.contracts.engine:VoiceRef.ref_wav: Path
+voxlektor.contracts.protocol:BackRequest [tag_field='cmd', tag='back']
 voxlektor.contracts.protocol:BackRequest(v: int, id: str)
-voxlektor.contracts.protocol:BackRequest.id: ?
-voxlektor.contracts.protocol:BackRequest.v: ?
+voxlektor.contracts.protocol:BackRequest.id: str
+voxlektor.contracts.protocol:BackRequest.v: int
 voxlektor.contracts.protocol:ErrorCode(*values)
 voxlektor.contracts.protocol:ErrorCode.audio_failed = 'audio_failed'
 voxlektor.contracts.protocol:ErrorCode.bad_frame = 'bad_frame'
@@ -246,15 +255,17 @@ voxlektor.contracts.protocol:Event(v: int, event: str, data: dict[str, typing.An
 voxlektor.contracts.protocol:Event.data: dict[str, typing.Any]
 voxlektor.contracts.protocol:Event.event: str
 voxlektor.contracts.protocol:Event.v: int
+voxlektor.contracts.protocol:IdleRequest [tag_field='cmd', tag='idle']
 voxlektor.contracts.protocol:IdleRequest(v: int, id: str, timeout: str)
-voxlektor.contracts.protocol:IdleRequest.id: ?
+voxlektor.contracts.protocol:IdleRequest.id: str
 voxlektor.contracts.protocol:IdleRequest.timeout: str
-voxlektor.contracts.protocol:IdleRequest.v: ?
+voxlektor.contracts.protocol:IdleRequest.v: int
 voxlektor.contracts.protocol:MAX_FRAME = 1048576
 voxlektor.contracts.protocol:PROTOCOL_VERSION = 1
+voxlektor.contracts.protocol:PauseRequest [tag_field='cmd', tag='pause']
 voxlektor.contracts.protocol:PauseRequest(v: int, id: str)
-voxlektor.contracts.protocol:PauseRequest.id: ?
-voxlektor.contracts.protocol:PauseRequest.v: ?
+voxlektor.contracts.protocol:PauseRequest.id: str
+voxlektor.contracts.protocol:PauseRequest.v: int
 voxlektor.contracts.protocol:Reply(v: int, id: str | None, ok: bool, data: dict[str, typing.Any] | None = None, error: voxlektor.contracts.protocol.ReplyError | None = None)
 voxlektor.contracts.protocol:Reply.data: dict[str, typing.Any] | None
 voxlektor.contracts.protocol:Reply.error: voxlektor.contracts.protocol.ReplyError | None
@@ -264,36 +275,46 @@ voxlektor.contracts.protocol:Reply.v: int
 voxlektor.contracts.protocol:ReplyError(code: voxlektor.contracts.protocol.ErrorCode, message: str)
 voxlektor.contracts.protocol:ReplyError.code: voxlektor.contracts.protocol.ErrorCode
 voxlektor.contracts.protocol:ReplyError.message: str
-voxlektor.contracts.protocol:Request = Request
+voxlektor.contracts.protocol:Request: TypeAlias = voxlektor.contracts.protocol.SpeakRequest | voxlektor.contracts.protocol.PauseRequest | voxlektor.contracts.protocol.ResumeRequest | voxlektor.contracts.protocol.SkipRequest | voxlektor.contracts.protocol.BackRequest | voxlektor.contracts.protocol.StopReadingRequest | voxlektor.contracts.protocol.StatusRequest | voxlektor.contracts.protocol.IdleRequest | voxlektor.contracts.protocol.UnloadRequest | voxlektor.contracts.protocol.ShutdownRequest | voxlektor.contracts.protocol.SubscribeRequest
+voxlektor.contracts.protocol:ResumeRequest [tag_field='cmd', tag='resume']
 voxlektor.contracts.protocol:ResumeRequest(v: int, id: str)
-voxlektor.contracts.protocol:ResumeRequest.id: ?
-voxlektor.contracts.protocol:ResumeRequest.v: ?
+voxlektor.contracts.protocol:ResumeRequest.id: str
+voxlektor.contracts.protocol:ResumeRequest.v: int
+voxlektor.contracts.protocol:ShutdownRequest [tag_field='cmd', tag='shutdown']
 voxlektor.contracts.protocol:ShutdownRequest(v: int, id: str)
-voxlektor.contracts.protocol:ShutdownRequest.id: ?
-voxlektor.contracts.protocol:ShutdownRequest.v: ?
+voxlektor.contracts.protocol:ShutdownRequest.id: str
+voxlektor.contracts.protocol:ShutdownRequest.v: int
+voxlektor.contracts.protocol:SkipRequest [tag_field='cmd', tag='skip']
 voxlektor.contracts.protocol:SkipRequest(v: int, id: str)
-voxlektor.contracts.protocol:SkipRequest.id: ?
-voxlektor.contracts.protocol:SkipRequest.v: ?
-voxlektor.contracts.protocol:SpeakRequest(v: int, id: str, text: str, voice: str | None = None, lang: Optional[Literal['auto', 'pl', 'en']] = None, rate: float | None = None, now: bool = False)
-voxlektor.contracts.protocol:SpeakRequest.id: ?
+voxlektor.contracts.protocol:SkipRequest.id: str
+voxlektor.contracts.protocol:SkipRequest.v: int
+voxlektor.contracts.protocol:SpeakRequest [tag_field='cmd', tag='speak']
+voxlektor.contracts.protocol:SpeakRequest(v: int, id: str, text: str, voice: str | None = None, lang: Optional[Literal['auto', 'pl', 'en']] = None, rate: float | None = None, now: bool = False, base_lang: Optional[Literal['pl', 'en']] = None)
+voxlektor.contracts.protocol:SpeakRequest.base_lang: Optional[Literal['pl', 'en']]
+voxlektor.contracts.protocol:SpeakRequest.id: str
 voxlektor.contracts.protocol:SpeakRequest.lang: Optional[Literal['auto', 'pl', 'en']]
 voxlektor.contracts.protocol:SpeakRequest.now: bool
 voxlektor.contracts.protocol:SpeakRequest.rate: float | None
 voxlektor.contracts.protocol:SpeakRequest.text: str
-voxlektor.contracts.protocol:SpeakRequest.v: ?
+voxlektor.contracts.protocol:SpeakRequest.v: int
 voxlektor.contracts.protocol:SpeakRequest.voice: str | None
+voxlektor.contracts.protocol:StatusRequest [tag_field='cmd', tag='status']
 voxlektor.contracts.protocol:StatusRequest(v: int, id: str)
-voxlektor.contracts.protocol:StatusRequest.id: ?
-voxlektor.contracts.protocol:StatusRequest.v: ?
+voxlektor.contracts.protocol:StatusRequest.id: str
+voxlektor.contracts.protocol:StatusRequest.v: int
+voxlektor.contracts.protocol:StopReadingRequest [tag_field='cmd', tag='stop_reading']
 voxlektor.contracts.protocol:StopReadingRequest(v: int, id: str)
-voxlektor.contracts.protocol:StopReadingRequest.id: ?
-voxlektor.contracts.protocol:StopReadingRequest.v: ?
+voxlektor.contracts.protocol:StopReadingRequest.id: str
+voxlektor.contracts.protocol:StopReadingRequest.v: int
+voxlektor.contracts.protocol:SubscribeRequest [tag_field='cmd', tag='subscribe']
 voxlektor.contracts.protocol:SubscribeRequest(v: int, id: str)
-voxlektor.contracts.protocol:SubscribeRequest.id: ?
-voxlektor.contracts.protocol:SubscribeRequest.v: ?
+voxlektor.contracts.protocol:SubscribeRequest.id: str
+voxlektor.contracts.protocol:SubscribeRequest.v: int
+voxlektor.contracts.protocol:UnloadRequest [tag_field='cmd', tag='unload']
 voxlektor.contracts.protocol:UnloadRequest(v: int, id: str)
-voxlektor.contracts.protocol:UnloadRequest.id: ?
-voxlektor.contracts.protocol:UnloadRequest.v: ?
+voxlektor.contracts.protocol:UnloadRequest.id: str
+voxlektor.contracts.protocol:UnloadRequest.v: int
+voxlektor.contracts.protocol:WireLang: TypeAlias = Literal['auto', 'pl', 'en']
 voxlektor.contracts.voicefmt:CACHE_DIR = 'cache'
 voxlektor.contracts.voicefmt:MAX_REF_SECONDS = 30
 voxlektor.contracts.voicefmt:META = 'voice.toml'
@@ -314,10 +335,10 @@ voxlektor.domain.errors:NotRunning(message: str = 'voxlektor is not running') ->
 voxlektor.domain.errors:PlatformError(message: str = 'platform not supported yet') -> None
 voxlektor.domain.errors:ServiceUnavailable(message: str = 'voxlektor is not running') -> None
 voxlektor.domain.errors:UnknownVoice(name: str, available: tuple[str, ...]) -> None
-voxlektor.domain.keepwarm:Action = Action
+voxlektor.domain.keepwarm:Action: TypeAlias = voxlektor.domain.keepwarm.StartLoad | voxlektor.domain.keepwarm.StartUnload | voxlektor.domain.keepwarm.ScheduleWake | voxlektor.domain.keepwarm.CancelWake | voxlektor.domain.keepwarm.FlushPending
 voxlektor.domain.keepwarm:Busy() -> None
 voxlektor.domain.keepwarm:CancelWake() -> None
-voxlektor.domain.keepwarm:Event = Event
+voxlektor.domain.keepwarm:Event: TypeAlias = voxlektor.domain.keepwarm.NeedEngine | voxlektor.domain.keepwarm.Loaded | voxlektor.domain.keepwarm.LoadFailed | voxlektor.domain.keepwarm.Idle | voxlektor.domain.keepwarm.Busy | voxlektor.domain.keepwarm.UnloadRequested | voxlektor.domain.keepwarm.Unloaded | voxlektor.domain.keepwarm.Wake | voxlektor.domain.keepwarm.SetTimeout
 voxlektor.domain.keepwarm:FlushPending() -> None
 voxlektor.domain.keepwarm:Idle(now: float) -> None
 voxlektor.domain.keepwarm:Idle.now: float
@@ -351,9 +372,13 @@ voxlektor.domain.keepwarm:transition(s: voxlektor.domain.keepwarm.KeepWarm, e: E
 voxlektor.domain.playback:PlaybackQueue(history: int = 20) -> None
 voxlektor.domain.playback:PlaybackQueue.back(self) -> list[A]
 voxlektor.domain.playback:PlaybackQueue.clear(self) -> list[A]
+voxlektor.domain.playback:PlaybackQueue.current: property -> Optional[A]
 voxlektor.domain.playback:PlaybackQueue.finish_current(self) -> None
+voxlektor.domain.playback:PlaybackQueue.history: property -> tuple[A, ...]
 voxlektor.domain.playback:PlaybackQueue.pause(self) -> None
+voxlektor.domain.playback:PlaybackQueue.paused: property -> bool
 voxlektor.domain.playback:PlaybackQueue.push(self, item: A) -> None
+voxlektor.domain.playback:PlaybackQueue.queued: property -> int
 voxlektor.domain.playback:PlaybackQueue.resume(self) -> None
 voxlektor.domain.playback:PlaybackQueue.skip(self) -> Optional[A]
 voxlektor.domain.playback:PlaybackQueue.start_next(self) -> Optional[A]
@@ -385,6 +410,9 @@ voxlektor.domain.text.lang:detect_lang(text: str, fallback: Literal['pl', 'en'])
 voxlektor.domain.types:ChunkId(x, /)
 voxlektor.domain.types:EngineId(x, /)
 voxlektor.domain.types:Epoch(x, /)
+voxlektor.domain.types:Lang: TypeAlias = Literal['pl', 'en']
+voxlektor.domain.types:LangPref: TypeAlias = Literal['auto', 'pl', 'en']
+voxlektor.domain.types:Seconds: TypeAlias = float
 voxlektor.domain.types:VoiceName(x, /)
 voxlektor.entrypoints.cli.app:main(argv: list[str] | None = None) -> int
 voxlektor.entrypoints.daemon:serve(settings: voxlektor.domain.settings.Settings) -> int
@@ -399,8 +427,8 @@ voxlektor.runtime.engine_worker:EngineWorker.close(self) -> None
 voxlektor.runtime.engine_worker:EngineWorker.submit(self, job: voxlektor.app.effects.LoadEngine | voxlektor.app.effects.UnloadEngine | voxlektor.app.effects.PrepareVoice | voxlektor.app.effects.Generate, on_result: collections.abc.Callable[[tuple[voxlektor.contracts.engine.AudioChunk, float] | None], None], on_error: collections.abc.Callable[[str], None]) -> None
 voxlektor.runtime.loop:CoreLoop(session: voxlektor.app.session.Session, worker: voxlektor.runtime.engine_worker.EngineWorker, output: voxlektor.app.ports.AudioOutput, buffers: voxlektor.runtime.buffers.AudioBuffers, clock: voxlektor.app.ports.Clock, cues: voxlektor.app.ports.CuePlayer) -> None
 voxlektor.runtime.loop:CoreLoop.execute(self, effects: list[Effect]) -> None
-voxlektor.runtime.loop:CoreLoop.handle(self, cmd: Command) -> voxlektor.app.effects.Reply
-voxlektor.runtime.loop:CoreLoop.run_until_stopped(self) -> None
+voxlektor.runtime.loop:async CoreLoop.handle(self, cmd: Command) -> voxlektor.app.effects.Reply
+voxlektor.runtime.loop:async CoreLoop.run_until_stopped(self) -> None
 voxlektor.testing.engine_contract:run_engine_contract(engine: voxlektor.contracts.engine.Engine, ref: voxlektor.contracts.engine.VoiceRef) -> None
 voxlektor.testing.fakes:FakeClock(t: float = 0.0) -> None
 voxlektor.testing.fakes:FakeClock.advance(self, s: float) -> None
@@ -431,12 +459,13 @@ voxlektor.testing.simulator:FailureReply.chunk: voxlektor.domain.reading.Chunk |
 voxlektor.testing.simulator:FailureReply.effects: tuple[Effect, ...]
 voxlektor.testing.simulator:FailureReply.effects_before: int
 voxlektor.testing.simulator:FailureReply.voice: str
-voxlektor.testing.simulator:SimulationError(...)
+voxlektor.testing.simulator:SimulationError(*args: object)
 voxlektor.testing.simulator:Simulator(session: voxlektor.app.session.Session, engine: voxlektor.testing.fakes.FakeEngine, output: voxlektor.adapters.audio.memory_out.MemoryOutput, clock: voxlektor.testing.fakes.FakeClock) -> None
 voxlektor.testing.simulator:Simulator.advance(self, seconds: float) -> None
 voxlektor.testing.simulator:Simulator.apply(self, effects: list[Effect]) -> None
 voxlektor.testing.simulator:Simulator.complete(self, chunk: Optional[voxlektor.domain.types.ChunkId] = None) -> None
 voxlektor.testing.simulator:Simulator.fail_playback(self, msg: str, chunk: Optional[voxlektor.domain.types.ChunkId] = None) -> None
+voxlektor.testing.simulator:Simulator.generated_unplayed: property -> int
 voxlektor.testing.simulator:Simulator.handle(self, cmd: Command) -> voxlektor.app.effects.Reply
 voxlektor.testing.simulator:Simulator.run_until_idle(self) -> None
 voxlektor.testing.simulator:Simulator.status(self) -> collections.abc.Mapping[str, object]

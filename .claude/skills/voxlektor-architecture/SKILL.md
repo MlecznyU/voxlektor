@@ -49,7 +49,9 @@ Binding map: `docs/architecture.md`. Rules are enforced by `lint-imports`, pyrig
 2. Advertise it in `status.caps`; add golden fixtures in `tests/contracts/protocol_v1/*.jsonl`.
 3. `adapters/transport/mapping.py` (the only place that knows both wire and application types).
 4. `app/commands.py` + `app/session.py` handling, then `entrypoints/cli/...`.
-5. Regenerate `docs/protocol.md` and the schema with the generator (never by hand); `api-add`.
+5. Update `docs/protocol.md` by hand (it is hand-written; `tests/adapters/transport/test_wire_examples.py`
+   checks its examples against the real code path); regenerate `docs/protocol/v1.schema.json` with
+   `uv run python scripts/gen_schema.py` (never by hand); `api-add`.
 
 ## Add an Effect
 
@@ -76,9 +78,12 @@ Binding map: `docs/architecture.md`. Rules are enforced by `lint-imports`, pyrig
 
 ## API change requests
 
-The frozen surface (plan Interfaces blocks, `contracts/*`, `app/ports.py`, `app/commands.py`,
-`app/effects.py`, CLI commands/options/exit codes, config keys, `VOXLEKTOR_*` names) is recorded in
-`tests/architecture/api_snapshot.txt`. Tasks may only add entries their own Interfaces block names
+The frozen surface is plan Interfaces blocks, `contracts/*`, `app/ports.py`, `app/commands.py`,
+`app/effects.py`, CLI commands/options/exit codes, config keys and `VOXLEKTOR_*` names. The Python
+symbols and the CLI command tree with its options are recorded in
+`tests/architecture/api_snapshot.txt`; config keys and `VOXLEKTOR_*` names are pinned by
+`tests/adapters/storage/test_settings_toml.py`, exit codes by `tests/entrypoints/cli/test_output.py`
+and `tests/entrypoints/cli/test_app.py` (130). Tasks may only add entries their own Interfaces block names
 (`uv run poe api-add`). If the interface is wrong, stop that part, do not work around it, and send:
 
 - **What**: current vs proposed, exact signatures

@@ -5,6 +5,7 @@ plays the client once the pid file appears.
 """
 
 import fcntl
+import json
 import logging
 import logging.handlers
 import os
@@ -65,11 +66,12 @@ def test_unsupported_platform_exits_3(
 @pytest.mark.parametrize(
     "answer",
     [
-        b'{"v":1,"id":"serve-probe","ok":true,"data":{"state":"WARM"}}\n',
-        b'{"v":1,"id":"serve-probe","ok":false,"error":{"code":"internal","message":"bye"}}\n',
+        b'{"v":1,"id":"ID","ok":true,"data":{"state":"WARM"}}\n',
+        b'{"v":1,"id":"ID","ok":false,"error":{"code":"internal","message":"bye"}}\n',
+        b'{"v":1,"id":"someone-else","ok":true,"data":{}}\n',
         b"garbage\n",
     ],
-    ids=["ready", "shutting-down", "undecodable"],
+    ids=["ready", "shutting-down", "foreign-reply", "undecodable"],
 )
 def test_anything_answering_on_the_socket_means_already_running(
     home: Path, capsys: pytest.CaptureFixture[str], answer: bytes
@@ -83,8 +85,8 @@ def test_anything_answering_on_the_socket_means_already_running(
         def reply() -> None:
             conn, _ = listener.accept()
             with conn:
-                conn.recv(4096)
-                conn.sendall(answer)
+                probe_id = json.loads(conn.recv(4096))["id"]  # echoed like a real daemon
+                conn.sendall(answer.replace(b'"ID"', json.dumps(probe_id).encode()))
 
         other = threading.Thread(target=reply)
         other.start()
@@ -126,9 +128,9 @@ def test_serve_waits_for_a_daemon_that_is_shutting_down(home: Path) -> None:
         waiting.start()
         conn, _ = old.accept()  # serve found the lock taken and probes the old daemon
         with conn:
-            conn.recv(4096)
+            probe_id = json.dumps(json.loads(conn.recv(4096))["id"]).encode()
             conn.sendall(
-                b'{"v":1,"id":"serve-probe","ok":false,'
+                b'{"v":1,"id":' + probe_id + b',"ok":false,'
                 b'"error":{"code":"internal","message":"the service is shutting down"}}\n'
             )
     path.unlink()  # the old daemon removes its socket ...
