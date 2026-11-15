@@ -44,6 +44,7 @@ from voxlektor.contracts.protocol import ErrorCode, Reply, ReplyError
 from voxlektor.domain.settings import Settings
 from voxlektor.runtime.buffers import AudioBuffers
 from voxlektor.runtime.engine_worker import EngineWorker
+from voxlektor.runtime.events import EventHub
 from voxlektor.runtime.loop import CoreLoop
 
 _log = logging.getLogger(__name__)
@@ -223,7 +224,7 @@ def build_daemon(
     # Starts the engine thread; every chunk: time_stretch, then level (normalise, volume, limit).
     worker = EngineWorker(load_engine, repo, time_stretch, level=dsp_level)
     try:
-        core = CoreLoop(session, worker, output, AudioBuffers(), clock, cues)
+        core = CoreLoop(session, worker, output, AudioBuffers(), clock, cues, events=EventHub())
     except BaseException:
         worker.close()
         raise

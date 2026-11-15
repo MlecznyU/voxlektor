@@ -116,6 +116,43 @@ def test_speak_volume_out_of_range_is_invalid_argument(volume: bytes) -> None:
     assert err.code is ErrorCode.invalid_argument
 
 
+def test_speak_queue_fields_decode() -> None:
+    req = decode_request(
+        b'{"v":1,"id":"1","cmd":"speak","text":"x","owner":"a.b:c-1","group":"g","tag":"t",'
+        b'"preempt":true}'
+    )
+    assert isinstance(req, SpeakRequest)
+    assert (req.owner, req.group, req.tag, req.preempt) == ("a.b:c-1", "g", "t", True)
+    plain = SpeakRequest(v=1, id="1", text="x")
+    assert (plain.owner, plain.group, plain.tag, plain.preempt) == (None, None, None, False)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        b'"owner":"a b"',
+        b'"owner":""',
+        b'"owner":"%s"' % (b"a" * 65),
+        b'"tag":""',
+        b'"group":""',
+        b'"tag":"%s"' % (b"t" * 129),
+        b'"preempt":"yes"',
+    ],
+)
+def test_speak_queue_fields_invalid_is_invalid_argument(fields: bytes) -> None:
+    err = _fail(b'{"v":1,"id":"1","cmd":"speak","text":"x",%s}' % fields)
+    assert err.code is ErrorCode.invalid_argument
+
+
+@pytest.mark.parametrize("cmd", ["pause", "resume", "skip", "back", "stop_reading"])
+def test_owner_on_control_requests(cmd: str) -> None:
+    req = decode_request(b'{"v":1,"id":"1","cmd":"%s","owner":"o1"}' % cmd.encode())
+    assert getattr(req, "owner") == "o1"  # noqa: B009
+    assert getattr(decode_request(b'{"v":1,"id":"1","cmd":"%s"}' % cmd.encode()), "owner") is None  # noqa: B009
+    err = _fail(b'{"v":1,"id":"1","cmd":"%s","owner":"a b"}' % cmd.encode())
+    assert err.code is ErrorCode.invalid_argument
+
+
 def test_reply_with_error_decodes() -> None:
     rep = decode_reply(b'{"v":1,"id":null,"ok":false,"error":{"code":"bad_frame","message":"m"}}')
     assert rep == Reply(v=1, id=None, ok=False, error=ReplyError(ErrorCode.bad_frame, "m"))

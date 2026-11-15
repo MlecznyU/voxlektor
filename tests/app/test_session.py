@@ -23,6 +23,7 @@ from voxlektor.app.effects import (
     Cue,
     DropAudio,
     Effect,
+    Emit,
     Exit,
     Generate,
     LoadEngine,
@@ -60,6 +61,10 @@ STATUS_KEYS = {
     "audio_seconds",
     "last_error",
     "caps",
+    "floor",
+    "waiting",
+    "groups",
+    "tag",
 }
 CAPS = [
     "back",
@@ -123,6 +128,11 @@ def _of[E: Effect](sim: Simulator, kind: type[E]) -> list[E]:
     return [e for e in sim.effects if isinstance(e, kind)]
 
 
+def _without_events(effects: list[Effect]) -> list[Effect]:
+    """``effects`` minus ``Emit`` (client events are tested in test_session_events.py)."""
+    return [e for e in effects if not isinstance(e, Emit)]
+
+
 def _played_tags(sim: Simulator) -> list[str]:
     return [sim.chunks[c].text.split()[0] for c in sim.output.started]
 
@@ -135,7 +145,7 @@ def test_cold_speak_loads_once_then_warm() -> None:
     assert sim.status()["state"] == "cold"
     reply = sim.handle(_speak(_text("a1", "a2")))
     assert reply.ok
-    assert reply.data == {"chunks": 2}
+    assert reply.data == {"chunks": 2, "group": "g1"}
     assert reply.error is None
     assert _of(sim, LoadEngine) == [LoadEngine(EngineId("fake"))]
     assert sim.status()["state"] == "warm"
@@ -263,7 +273,7 @@ def test_shutdown_stops_unloads_and_exits() -> None:
     sim.handle(_speak(_text("a", "b")))
     reply = sim.handle(Shutdown())
     assert reply.ok
-    assert isinstance(sim.effects[-1], Exit)
+    assert isinstance(_without_events(sim.effects)[-1], Exit)
     assert sim.exited
     assert sim.status()["state"] == "cold"
     assert sim.engine.unload_calls == 1
@@ -812,7 +822,7 @@ def test_now_aborts_old_reading_and_drops_late_results() -> None:
     sim.complete()  # a2 starts, a4 is requested but not generated yet
     old_epoch = sim.started[-1][1]
     reply = sim.handle(_speak(_text("n1", "n2"), now=True))
-    assert reply.data == {"chunks": 2}
+    assert reply.data == {"chunks": 2, "group": "g2"}
     assert sim.output.aborted == 1
     drop = _of(sim, DropAudio)[-1]
     assert [sim.chunks[c].text.split()[0] for c in drop.chunks] == ["a3"]
@@ -1042,6 +1052,10 @@ def test_status_contains_every_key_and_caps() -> None:
         "audio_seconds": 0.0,
         "last_error": None,
         "caps": CAPS,
+        "floor": None,
+        "waiting": 0,
+        "groups": [],
+        "tag": None,
     }
 
 

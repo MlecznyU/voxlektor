@@ -240,6 +240,34 @@ def test_queued_generates_older_than_the_epoch_are_skipped_silently(
     assert rec.events.empty()  # the skipped jobs reported nothing
 
 
+def test_cancel_epochs_spares_other_epochs(repo: InMemoryVoiceRepository) -> None:
+    provider = _Provider(_GatedEngine)
+    worker = EngineWorker(provider, repo, _Stretch())
+    rec = _Recorder()
+
+    def gen(cid: int, epoch: int) -> Generate:
+        return Generate(Chunk(ChunkId(cid), f"chunk {cid}", "en", 1.0, Epoch(epoch)), "v1")
+
+    try:
+        for label, job in [("load", LOAD), ("prepare", PREPARE), ("g0", gen(0, 2))]:
+            rec.submit(worker, label, job)
+        rec.take(2)
+        engine = provider.engines[0]
+        assert isinstance(engine, _GatedEngine)
+        assert engine.entered.wait(TIMEOUT)  # g0 is running and cannot be interrupted
+        rec.submit(worker, "g1", gen(1, 3))
+        rec.submit(worker, "g2", gen(2, 4))
+        rec.submit(worker, "g3", gen(3, 3))
+        worker.cancel_epochs([Epoch(3)])
+        worker.cancel_epochs([])  # an empty set cancels nothing
+        engine.gate.set()
+        assert [label for label, _, _ in rec.take(2)] == ["g0", "g2"]
+    finally:
+        worker.close()
+    assert [text for text, _ in engine.synth_calls] == ["chunk 0", "chunk 2"]
+    assert rec.events.empty()  # the skipped jobs reported nothing
+
+
 def test_errors_go_to_on_error_and_the_worker_keeps_going(worker: EngineWorker) -> None:
     rec = _Recorder()
     rec.submit(worker, "early", _gen(0))  # no engine yet

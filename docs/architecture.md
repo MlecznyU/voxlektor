@@ -41,6 +41,7 @@ src/voxlektor/
     keepwarm.py               COLD/LOADING/WARM/UNLOADING; transition(state, event) -> (state, actions); time arrives in events
     playback.py               PlaybackQueue[A]: queued/current/history(20); skip/back/stop/pause
     reading.py                Chunk; AheadWindow (max. 2 ahead); UnderrunTracker; plan_reading() (per-chunk language, same-language merge)
+    floor.py                  Floor: floor scheduler (oldest eligible group, owner pause, grace, hold, preempt); time arrives as arguments
     text/chunking.py          split_text()
     text/lang.py              detect_lang()
     text/limits.py            MAX_CHARS / MERGE_BELOW shared by split_text and plan_reading (not frozen)
@@ -48,8 +49,10 @@ src/voxlektor/
   app/                        SYNC, no threads and no asyncio; ports only
     ports.py                  Clock, AudioOutput, CuePlayer, VoiceRepository, SettingsStore (+ setup marker), PlatformInfo, EngineProvider; setup: Prompter (+ Option), SamplePlayer, ModelStore
     commands.py               application commands (independent of the protocol version)
-    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit, PlayCue(Cue); Reply, Outcome
-    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_prompt_failed/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded
+    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, CancelGeneration, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit, PlayCue(Cue), Emit; Reply, Outcome
+    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_prompt_failed/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded; multi-owner groups on the Floor
+    _groups.py                private Session state: Group (epoch, age, chunks), Item, Gen, Metrics, history_add
+    _events.py                private Session events (Emit): Tags (tag runs, exactly-once tag_finished), Watch (floor/waiting/paused/resumed/drained diffs)
     voice_prompts.py          get_or_build_prompt(): cache via VoiceRepository + Engine.serialize_prompt; fresh= rebuilds
     voices.py                 VoiceCatalog: list/resolve/ensure_bundled
     setup.py                  run_interactive() (engine, model + license, voice, base language, rate, volume, service; writes at the end) and apply_flags() (silent); SetupResult, SetupCancelled
@@ -109,7 +112,7 @@ Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{
 | CLI process | `entrypoints.cli` + `unix_client` | blocking socket I/O | does not import asyncio, numpy or MLX on the control path |
 | One-shot | `entrypoints.oneshot` | the same CoreLoop without transport | has no reading logic of its own |
 
-**Cancellation via epochs:** `--now`, `stop_reading` and `unload` bump the epoch; Session discards results with a stale epoch. CoreLoop derives a lower bound of the epoch from the effects and commands it sees and passes it to `EngineWorker.cancel_before`, so queued `Generate` jobs of an abandoned reading are skipped without a result. A single OmniVoice `generate` cannot be interrupted, so in the worst case one chunk is wasted.
+**Cancellation via epochs:** every group carries an epoch (all groups of one owner share it); `--now`, `stop_reading`, `back`, failures and `unload` give the affected owners a fresh epoch, and Session discards results with a stale epoch. Session names the epochs it abandons in `CancelGeneration`; CoreLoop passes them to `EngineWorker.cancel_epochs`, so queued `Generate` jobs of an abandoned reading are skipped without a result, while other owners' queued jobs still run. A single OmniVoice `generate` cannot be interrupted, so in the worst case one chunk is wasted.
 
 **MLX / audio rules:** MLX arrays never leave the engine thread. `unload` on the same thread as `load`. The daemon starts via `subprocess` (argv), never via `os.fork` after importing MLX/PortAudio. Audio output with `latency="high"`; playback starts once the first chunk is buffered.
 

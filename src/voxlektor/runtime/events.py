@@ -1,7 +1,8 @@
 """EventHub: fan-out of server events to subscribers.
 
-Groundwork for protocol v1 ``subscribe`` (reserved; the MVP daemon answers ``unsupported`` and
-nothing subscribes yet). Loop thread only.
+``CoreLoop`` publishes every ``Emit`` effect of the Session here, in effect order; bootstrap
+creates one hub per daemon. Groundwork for protocol v1 ``subscribe`` (reserved; the daemon
+still answers ``unsupported`` and nothing subscribes yet). Loop thread only.
 """
 
 from collections.abc import Callable, Mapping

@@ -19,11 +19,12 @@ a bug of ours; it is logged and reported to the Session as a playback failure of
 started (``on_play_failed``, ignored when that chunk is no longer playing), so the daemon keeps
 serving and the next ``speak`` works.
 
-Epochs (cooperative cancellation): the loop keeps a lower bound of the Session's epoch, derived
-from what it sees: the epoch of every ``Generate``, plus one for each event that always bumps
-the Session's epoch (``StopReading``, ``Unload``, ``Shutdown``, a ``Speak --now`` that planned
-chunks, and the ``Cue.STOPPED`` of a failed reading). It hands the bound to
-``EngineWorker.cancel_before``, so queued generations of an abandoned reading are skipped.
+Epochs (cooperative cancellation): the loop does not guess the Session's epochs. The Session
+names the epochs it abandons in ``CancelGeneration``, and the loop hands them to
+``EngineWorker.cancel_epochs``, so queued generations of an abandoned reading are skipped.
+
+Events: ``Emit`` is published to the ``EventHub`` given as ``events`` (on the loop thread, in
+effect order); without a hub it is dropped.
 
 Stopping: ``Exit`` (after ``Shutdown``) resolves ``run_until_stopped``, which cancels the wake
 timers and aborts the output. The worker belongs to whoever built it: the owner closes it after
@@ -39,13 +40,14 @@ import logging
 from collections.abc import Callable
 from typing import assert_never
 
-from voxlektor.app.commands import Command, Shutdown, Speak, StopReading, Unload
+from voxlektor.app.commands import Command
 from voxlektor.app.effects import (
     AbortPlayback,
+    CancelGeneration,
     CancelWake,
-    Cue,
     DropAudio,
     Effect,
+    Emit,
     Exit,
     Generate,
     LoadEngine,
@@ -62,9 +64,10 @@ from voxlektor.app.ports import AudioOutput, Clock, CuePlayer
 from voxlektor.app.session import Session
 from voxlektor.contracts.engine import AudioChunk
 from voxlektor.domain.errors import DomainError
-from voxlektor.domain.types import ChunkId, Epoch
+from voxlektor.domain.types import ChunkId
 from voxlektor.runtime.buffers import AudioBuffers
 from voxlektor.runtime.engine_worker import EngineWorker
+from voxlektor.runtime.events import EventHub
 
 _log = logging.getLogger(__name__)
 
@@ -89,6 +92,8 @@ class CoreLoop:
         buffers: AudioBuffers,
         clock: Clock,
         cues: CuePlayer,
+        *,
+        events: EventHub | None = None,
     ) -> None:
         self._session = session
         self._worker = worker
@@ -96,10 +101,10 @@ class CoreLoop:
         self._buffers = buffers
         self._clock = clock
         self._cues = cues
+        self._events = events
         self._bound: _Bound | None = None
         self._stopping = False
         self._wakes: set[asyncio.TimerHandle] = set()
-        self._epoch = 0  # a lower bound of the Session's epoch (see the module docstring)
         self._last_started: ChunkId | None = None
         output.set_callbacks(self._on_play_done, self._on_play_failed)
 
@@ -113,8 +118,6 @@ class CoreLoop:
             return Reply(ok=False, data={}, error=error)
         try:
             outcome = self._session.handle(cmd)
-            if outcome.reply is not None and _bumps_epoch(cmd, outcome.reply):
-                self._advance_epoch(self._epoch + 1)
             self.execute(outcome.effects)
         except Exception as exc:
             self._crash(exc)
@@ -155,11 +158,10 @@ class CoreLoop:
 
     def _execute(self, effect: Effect, bound: _Bound) -> None:
         match effect:
-            case Generate(chunk):
-                self._advance_epoch(chunk.epoch)
+            case LoadEngine() | UnloadEngine() | PrepareVoice() | Generate():
                 self._submit(effect)
-            case LoadEngine() | UnloadEngine() | PrepareVoice():
-                self._submit(effect)
+            case CancelGeneration(epochs):
+                self._worker.cancel_epochs(epochs)
             case StartPlayback() | PausePlayback() | ResumePlayback() | AbortPlayback():
                 self._control_output(self._output_action(effect))
             case DropAudio(chunks):
@@ -169,9 +171,10 @@ class CoreLoop:
             case CancelWake():
                 self._cancel_wakes()
             case PlayCue(cue, volume):
-                if cue is Cue.STOPPED:  # only a failed reading plays it, after stopping it
-                    self._advance_epoch(self._epoch + 1)
                 self._cues.play(cue, volume)
+            case Emit(event, data):
+                if self._events is not None:
+                    self._events.publish(event, data)
             case Exit():
                 self._stop(bound)
             case _:
@@ -201,11 +204,6 @@ class CoreLoop:
             if chunk is not None:
                 msg = f"audio output failed: {exc}"
                 self._post(lambda: self._session.on_play_failed(chunk, msg))
-
-    def _advance_epoch(self, epoch: int) -> None:
-        if epoch > self._epoch:
-            self._epoch = epoch
-            self._worker.cancel_before(Epoch(epoch))
 
     def _deliver(self, call: _Call) -> None:
         """Run a Session callback and its effects; ignored once stopping."""
@@ -305,10 +303,3 @@ class CoreLoop:
 
     def _on_play_failed(self, chunk: ChunkId, msg: str) -> None:
         self._post(lambda: self._session.on_play_failed(chunk, msg))
-
-
-def _bumps_epoch(cmd: Command, reply: Reply) -> bool:
-    """True for the commands after which the Session's epoch is always higher than before."""
-    if isinstance(cmd, StopReading | Unload | Shutdown):
-        return True
-    return isinstance(cmd, Speak) and cmd.now and reply.ok and bool(reply.data.get("chunks"))

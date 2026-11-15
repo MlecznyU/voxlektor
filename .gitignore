@@ -10,3 +10,4 @@ docs/superpowers/
 .pytest_cache/
 .ruff_cache/
 .idea/
+/.claude/worktrees/

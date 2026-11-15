@@ -109,7 +109,7 @@ def test_speak_then_status_warm_then_shutdown_removes_socket_and_pid(daemon: _Ru
     speak = request(daemon.socket, _line("speak", text="Hello there, this is a test.", lang="en"))
     assert speak.ok
     assert speak.id == "speak-1"
-    assert speak.data == {"chunks": 1}
+    assert speak.data == {"chunks": 1, "group": "g1"}
     assert daemon.output.first_start.wait(TIMEOUT)
     status = request(daemon.socket, _line("status"))
     assert status.ok

@@ -41,6 +41,13 @@ class _Request(msgspec.Struct, tag_field="cmd", omit_defaults=True):
     id: str
 
 
+OWNER_PATTERN = r"^[A-Za-z0-9._:-]{1,64}$"
+
+# Added within v1 (S1): identity of the client on the multi-client reading queue.
+_Owner = Annotated[str, msgspec.Meta(pattern=OWNER_PATTERN)]
+_Label = Annotated[str, msgspec.Meta(min_length=1, max_length=128)]
+
+
 class SpeakRequest(_Request, tag="speak"):
     text: str
     voice: str | None = None
@@ -51,26 +58,31 @@ class SpeakRequest(_Request, tag="speak"):
     base_lang: Literal["pl", "en"] | None = None  # tie fallback of `auto` detection
     # Added within v1 (Etap 1.1); daemons before Etap 1.1 ignore it. 50 = the even level.
     volume: Annotated[int, msgspec.Meta(ge=0, le=100)] | None = None
+    # Added within v1 (S1): queue identity; daemons before S1 ignore these.
+    owner: _Owner | None = None
+    group: _Label | None = None
+    tag: _Label | None = None
+    preempt: bool = False
 
 
 class PauseRequest(_Request, tag="pause"):
-    pass
+    owner: _Owner | None = None  # Added within v1 (S1)
 
 
 class ResumeRequest(_Request, tag="resume"):
-    pass
+    owner: _Owner | None = None  # Added within v1 (S1)
 
 
 class SkipRequest(_Request, tag="skip"):
-    pass
+    owner: _Owner | None = None  # Added within v1 (S1)
 
 
 class BackRequest(_Request, tag="back"):
-    pass
+    owner: _Owner | None = None  # Added within v1 (S1)
 
 
 class StopReadingRequest(_Request, tag="stop_reading"):
-    pass
+    owner: _Owner | None = None  # Added within v1 (S1)
 
 
 class StatusRequest(_Request, tag="status"):

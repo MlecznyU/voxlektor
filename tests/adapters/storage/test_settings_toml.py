@@ -20,7 +20,7 @@ def test_read_file_layout(tmp_path: Path) -> None:
     (tmp_path / "config.toml").write_text(
         'config_version = 1\nengine = "fake"\nvoice = "ola"\nlang = "pl"\n'
         'base_lang = "en"\nrate = 1.5\nvolume = 70\nhistory = 7\nfoo = 1\n\n'
-        '[service]\nidle_timeout = "5m"\nautostart = false\n'
+        '[service]\nidle_timeout = "5m"\nautostart = false\nfloor_grace = "15s"\n'
     )
     assert store(tmp_path).read_file() == {
         "engine": "fake",
@@ -32,6 +32,7 @@ def test_read_file_layout(tmp_path: Path) -> None:
         "history": 7,
         "idle_timeout": "5m",
         "autostart": False,
+        "floor_grace": "15s",
     }
 
 
@@ -57,6 +58,7 @@ def test_env_parsing(tmp_path: Path) -> None:
         "VOXLEKTOR_VOLUME": "70",
         "VOXLEKTOR_IDLE_TIMEOUT": "10m",
         "VOXLEKTOR_AUTOSTART": "false",
+        "VOXLEKTOR_FLOOR_GRACE": "20s",
         "OTHER": "x",
     }
     assert TomlSettingsStore(tmp_path / "c.toml", env).read_env() == {
@@ -68,6 +70,7 @@ def test_env_parsing(tmp_path: Path) -> None:
         "volume": 70,
         "idle_timeout": "10m",
         "autostart": False,
+        "floor_grace": "20s",
     }
 
 
@@ -93,6 +96,13 @@ def test_write_value_volume_round_trip(tmp_path: Path) -> None:
     assert merge_layers(s.read_file()).volume == 35
 
 
+def test_env_floor_grace_seconds_and_override(tmp_path: Path) -> None:
+    assert store(tmp_path, VOXLEKTOR_FLOOR_GRACE="0").read_env() == {"floor_grace": 0}
+    (tmp_path / "config.toml").write_text('[service]\nfloor_grace = "15s"\n')
+    s = store(tmp_path, VOXLEKTOR_FLOOR_GRACE="30")
+    assert merge_layers(s.read_file(), s.read_env()).floor_grace_s == 30
+
+
 def test_env_idle_timeout_seconds(tmp_path: Path) -> None:
     assert store(tmp_path, VOXLEKTOR_IDLE_TIMEOUT="90").read_env() == {"idle_timeout": 90}
 
@@ -104,6 +114,7 @@ def test_env_idle_timeout_seconds(tmp_path: Path) -> None:
         ("VOXLEKTOR_RATE", "fast"),
         ("VOXLEKTOR_BASE_LANG", "auto"),
         ("VOXLEKTOR_IDLE_TIMEOUT", "soon"),
+        ("VOXLEKTOR_FLOOR_GRACE", "soon"),
     ],
 )
 def test_env_invalid_values_raise(tmp_path: Path, name: str, raw: str) -> None:

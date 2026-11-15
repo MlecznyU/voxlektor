@@ -24,7 +24,7 @@ by hand). Golden examples: `tests/contracts/protocol_v1/{requests,replies}.jsonl
 
 | cmd | arguments | reply `data` |
 |---|---|---|
-| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces the current reading), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it) | `{"chunks": N}`: number of planned chunks (0 for empty or whitespace-only text) |
+| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces the current reading), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it) | `{"chunks": N, "group": "<id>"}`: number of planned chunks and the group they joined (a daemon-chosen `g<n>` when the request named none; added within v1 S1); `{"chunks": 0}` for empty or whitespace-only text |
 | `pause` | none | `{}` |
 | `resume` | none | `{}` |
 | `skip` | none | `{}` |
@@ -40,10 +40,10 @@ Examples:
 
 ```
 > {"cmd":"speak","v":1,"id":"1","text":"Hello world.","voice":"m1-calm","lang":"en","rate":1.25,"now":true}
-< {"v":1,"id":"1","ok":true,"data":{"chunks":1}}
+< {"v":1,"id":"1","ok":true,"data":{"chunks":1,"group":"g1"}}
 
 > {"cmd":"speak","v":1,"id":"1a","text":"A little louder.","volume":70}
-< {"v":1,"id":"1a","ok":true,"data":{"chunks":1}}
+< {"v":1,"id":"1a","ok":true,"data":{"chunks":1,"group":"g1"}}
 
 > {"cmd":"idle","v":1,"id":"2","timeout":"10m"}
 < {"v":1,"id":"2","ok":true,"data":{"idle_timeout_s":600}}
@@ -87,7 +87,8 @@ protocol.
     "idle_timeout_s":600,"idle_remaining_s":590.5,"queued":0,"playing":false,"paused":false,
     "underruns":0,"first_audio_s":0.42,"chunks":3,"gen_seconds":1.5,"audio_seconds":9.0,
     "last_error":null,"caps":["back","idle","pause","resume","shutdown","skip","speak",
-    "status","stop_reading","unload"]}}
+    "status","stop_reading","unload"],"floor":{"owner":"cli","group":"g1"},"waiting":0,
+    "groups":[{"owner":"cli","group":"g1","position":0,"paused":false}],"tag":null}}
 ```
 
 (The reply is a single line on the wire.)
@@ -107,6 +108,10 @@ protocol.
 | `chunks`, `gen_seconds`, `audio_seconds` | metrics of the latest reading |
 | `last_error` | message of the engine or audio failure that stopped the latest reading, `null` if none; cleared when a new reading starts from idle |
 | `caps` | wire command names this daemon supports (sorted) |
+| `floor` | `{"owner": ..., "group": ...}` of the group holding the floor, `null` when none (added within v1 S1; requests without `owner` belong to the owner `cli`) |
+| `waiting` | number of queued groups not holding the floor (added within v1 S1) |
+| `groups` | every queued group in play order: `{"owner", "group", "position", "paused"}`; `position` `0` = the floor holder, `1` = next; groups of paused (passed-over) owners last with `position: null`; `paused` is that owner's pause flag (added within v1 S1) |
+| `tag` | the `speak` tag of the chunk playing, else of the floor group's next chunk, else `null` (added within v1 S1) |
 
 ### caps
 

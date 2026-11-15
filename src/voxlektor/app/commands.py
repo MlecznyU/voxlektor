@@ -24,31 +24,35 @@ class Speak:
     volume: int | None = field(default=None, kw_only=True)
     rate: float | None
     now: bool
+    owner: str | None = field(default=None, kw_only=True)
+    group: str | None = field(default=None, kw_only=True)
+    tag: str | None = field(default=None, kw_only=True)
+    preempt: bool = field(default=False, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
 class Pause:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Resume:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Skip:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Back:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class StopReading:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

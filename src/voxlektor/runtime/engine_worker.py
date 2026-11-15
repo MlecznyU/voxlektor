@@ -10,11 +10,13 @@ logged and never stops the worker. The result of a ``Generate`` is ``(audio, gen
 the joined, time-stretched audio (then, when a ``level`` function is given, normalised and set to
 the chunk's volume) and how long it took; every other job yields ``None``.
 
-Epochs and cooperative cancellation: the loop thread calls ``cancel_before(epoch)`` whenever it
-learns that the Session's epoch has moved (a shared int, written on the loop thread, read here).
-A queued ``Generate`` whose chunk epoch is older is skipped when its turn comes and reports
-nothing: the Session has already forgotten it. A synthesis that is running is never interrupted
-(OmniVoice cannot be), so at most one chunk is wasted.
+Epochs and cooperative cancellation: the loop thread calls ``cancel_epochs(epochs)`` for each
+``CancelGeneration`` effect, naming exactly the epochs the Session has abandoned. The cancelled
+set is a frozenset that the loop thread replaces (under the lock) and the worker thread only
+reads. ``cancel_before(epoch)`` (a lower bound) remains for callers that cancel everything
+older. A queued ``Generate`` whose chunk epoch is cancelled is skipped when its turn comes and
+reports nothing: the Session has already forgotten it. A synthesis that is running is never
+interrupted (OmniVoice cannot be), so at most one chunk is wasted.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import queue
 import threading
 import time
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import assert_never
 
@@ -67,6 +69,7 @@ class EngineWorker:
         self._engine: Engine | None = None  # touched only on the worker thread
         self._prompts: dict[str, VoicePrompt] = {}  # likewise
         self._min_epoch = 0  # written on the loop thread, read on the worker thread
+        self._cancelled: frozenset[Epoch] = frozenset()  # likewise; swapped, never mutated
         self._tasks: queue.SimpleQueue[_Task | None] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._closed = False
@@ -89,6 +92,11 @@ class EngineWorker:
         """Skip queued ``Generate`` jobs of chunks older than ``epoch`` (never lowers it)."""
         self._min_epoch = max(self._min_epoch, epoch)
 
+    def cancel_epochs(self, epochs: Iterable[Epoch]) -> None:
+        """Skip queued ``Generate`` jobs of chunks of ``epochs`` (added to those cancelled)."""
+        with self._lock:  # one writer at a time; the worker reads the frozenset it swaps in
+            self._cancelled = self._cancelled | frozenset(epochs)
+
     def close(self) -> None:
         """Run the jobs already queued, unload a loaded engine, then join the thread."""
         with self._lock:
@@ -110,7 +118,7 @@ class EngineWorker:
 
     def _serve(self, task: _Task) -> None:
         job = task.job
-        if isinstance(job, Generate) and job.chunk.epoch < self._min_epoch:
+        if isinstance(job, Generate) and self._stale(job.chunk.epoch):
             _log.debug("skipped stale chunk %s (epoch %s)", job.chunk.id, job.chunk.epoch)
             return
         try:
@@ -120,6 +128,9 @@ class EngineWorker:
             self._call(task.on_error, str(exc) or type(exc).__name__)
         else:
             self._call(task.on_result, result)
+
+    def _stale(self, epoch: Epoch) -> bool:
+        return epoch < self._min_epoch or epoch in self._cancelled
 
     @staticmethod
     def _call[T](callback: Callable[[T], None], value: T) -> None:

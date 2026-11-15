@@ -45,6 +45,15 @@ from voxlektor.testing.simulator import Simulator
             Speak("hi", "a", "pl", 1.5, True),
         ),
         (
+            wire.SpeakRequest(v=1, id="1", text="hi", owner="o", group="g", tag="t", preempt=True),
+            Speak("hi", None, None, None, False, owner="o", group="g", tag="t", preempt=True),
+        ),
+        (wire.PauseRequest(v=1, id="1", owner="o"), Pause(owner="o")),
+        (wire.ResumeRequest(v=1, id="1", owner="o"), Resume(owner="o")),
+        (wire.SkipRequest(v=1, id="1", owner="o"), Skip(owner="o")),
+        (wire.BackRequest(v=1, id="1", owner="o"), Back(owner="o")),
+        (wire.StopReadingRequest(v=1, id="1", owner="o"), StopReading(owner="o")),
+        (
             wire.SpeakRequest(v=1, id="1", text="hi", base_lang="en"),
             Speak("hi", None, None, None, False, base_lang="en"),
         ),
@@ -194,7 +203,7 @@ def _speak_sim() -> Simulator:
 def test_speak_reply_carries_the_planned_chunk_count() -> None:
     sim = _speak_sim()
     reply = to_wire_reply("r1", sim.handle(Speak("Hello world.", "a", None, None, False)))
-    assert reply.data == {"chunks": 1}
+    assert reply.data == {"chunks": 1, "group": "g1"}
     fixtures = Path(__file__).parents[2] / "contracts" / "protocol_v1" / "replies.jsonl"
     assert encode_line(reply) in fixtures.read_bytes().splitlines(keepends=True)
     assert to_wire_reply("r2", sim.handle(Speak("   ", "a", None, None, False))).data == {

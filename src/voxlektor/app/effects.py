@@ -11,7 +11,7 @@ from enum import StrEnum
 from voxlektor.contracts.engine import VoiceRef
 from voxlektor.domain.errors import DomainError
 from voxlektor.domain.reading import Chunk
-from voxlektor.domain.types import ChunkId, EngineId
+from voxlektor.domain.types import ChunkId, EngineId, Epoch
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +48,17 @@ class Generate:
 
     chunk: Chunk
     voice: str
+
+
+@dataclass(frozen=True, slots=True)
+class CancelGeneration:
+    """Skip the queued ``Generate`` jobs of ``epochs``; they report nothing.
+
+    The Session names exactly the epochs it has abandoned. A synthesis that is already running
+    is never interrupted; its result arrives and the Session drops it as stale.
+    """
+
+    epochs: tuple[Epoch, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,11 +126,23 @@ class PlayCue:
     volume: int = 50
 
 
+@dataclass(frozen=True, slots=True)
+class Emit:
+    """Publish the server event ``event`` with ``data`` to the subscribed clients.
+
+    Dropped when nothing can publish (a runtime without an event hub).
+    """
+
+    event: str
+    data: Mapping[str, object]
+
+
 type Effect = (
     LoadEngine
     | UnloadEngine
     | PrepareVoice
     | Generate
+    | CancelGeneration
     | StartPlayback
     | PausePlayback
     | ResumePlayback
@@ -129,6 +152,7 @@ type Effect = (
     | CancelWake
     | Exit
     | PlayCue
+    | Emit
 )
 
 

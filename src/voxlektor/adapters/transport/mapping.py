@@ -28,13 +28,24 @@ from voxlektor.domain.errors import DomainError, UnknownVoice
 _RENAMED = {"unsupported_platform": wire.ErrorCode.unsupported}
 
 
-# Requests that carry no arguments.
-_PLAIN: dict[type[wire.Request], Callable[[], Command]] = {
+# Reading-control requests: they carry only the optional ``owner``.
+_OWNED: dict[type[wire.Request], Callable[..., Command]] = {
     wire.PauseRequest: Pause,
     wire.ResumeRequest: Resume,
     wire.SkipRequest: Skip,
     wire.BackRequest: Back,
     wire.StopReadingRequest: StopReading,
+}
+_OWNED_REQUESTS = (
+    wire.PauseRequest,
+    wire.ResumeRequest,
+    wire.SkipRequest,
+    wire.BackRequest,
+    wire.StopReadingRequest,
+)
+
+# Requests that carry no arguments.
+_PLAIN: dict[type[wire.Request], Callable[[], Command]] = {
     wire.StatusRequest: Status,
     wire.UnloadRequest: Unload,
     wire.ShutdownRequest: Shutdown,
@@ -51,7 +62,13 @@ def to_command(req: wire.Request) -> Command:
             req.now,
             base_lang=req.base_lang,
             volume=req.volume,
+            owner=req.owner,
+            group=req.group,
+            tag=req.tag,
+            preempt=req.preempt,
         )
+    if isinstance(req, _OWNED_REQUESTS):
+        return _OWNED[type(req)](owner=req.owner)
     if isinstance(req, wire.IdleRequest):
         return SetIdle(req.timeout)
     if isinstance(req, wire.SubscribeRequest):

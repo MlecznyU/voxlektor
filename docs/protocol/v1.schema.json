@@ -10,6 +10,18 @@
         "id": {
           "type": "string"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "v": {
           "type": "integer"
         }
@@ -96,6 +108,18 @@
         },
         "id": {
           "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "v": {
           "type": "integer"
@@ -185,6 +209,18 @@
         "id": {
           "type": "string"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "v": {
           "type": "integer"
         }
@@ -229,6 +265,18 @@
         "id": {
           "type": "string"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "v": {
           "type": "integer"
         }
@@ -262,6 +310,19 @@
             "speak"
           ]
         },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "id": {
           "type": "string"
         },
@@ -284,10 +345,39 @@
           "default": false,
           "type": "boolean"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preempt": {
+          "default": false,
+          "type": "boolean"
+        },
         "rate": {
           "anyOf": [
             {
               "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
             },
             {
               "type": "null"
@@ -366,6 +456,18 @@
         },
         "id": {
           "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "v": {
           "type": "integer"

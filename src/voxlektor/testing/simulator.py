@@ -1,8 +1,10 @@
 """Deterministic Session driver: an immediate engine worker, a device-less output, a fake clock.
 
 No threads and no sleeps. Effects are executed in order: engine effects go to a FIFO worker
-queue (like ``runtime.engine_worker``), output effects go to ``MemoryOutput``, and output
-callbacks are queued and delivered after the current batch (like ``call_soon_threadsafe``).
+queue (like ``runtime.engine_worker``; ``CancelGeneration`` drops the queued ``Generate`` jobs
+of its epochs, except the first job, which counts as running), output effects go to
+``MemoryOutput``, ``Emit`` is recorded in ``events``, and output callbacks are queued and
+delivered after the current batch (like ``call_soon_threadsafe``).
 
 With ``auto_run`` (the default) the worker queue is drained after every action; set it to
 False to hold engine jobs back and release them with ``step()`` or ``run_until_idle()``.
@@ -30,10 +32,12 @@ import numpy as np
 from voxlektor.app.commands import Command, Status
 from voxlektor.app.effects import (
     AbortPlayback,
+    CancelGeneration,
     CancelWake,
     Cue,
     DropAudio,
     Effect,
+    Emit,
     Exit,
     Generate,
     LoadEngine,
@@ -92,6 +96,7 @@ class Simulator:
         self.started: list[tuple[ChunkId, Epoch]] = []  # chunk and the epoch of its audio
         self.generate_states: list[tuple[str, Generate]] = []  # Session state at each Generate
         self.cues: list[Cue] = []  # every cue played, in order
+        self.events: list[Emit] = []  # every event emitted, in order
         self.failure_replies: list[FailureReply] = []  # engine failures and the Session's answers
         self.max_generated_unplayed = 0
         self.exited = False
@@ -210,6 +215,8 @@ class Simulator:
                 self._jobs.append(effect)
             case Generate(chunk):
                 self._submit_generate(effect, chunk)
+            case CancelGeneration(epochs):
+                self._cancel(set(epochs))
             case StartPlayback(chunk):
                 self._start(chunk)
             case PausePlayback() | ResumePlayback() | AbortPlayback():
@@ -222,17 +229,31 @@ class Simulator:
                 self.wakes.append(at)
             case CancelWake():
                 self.wakes.clear()
-            case Exit() | PlayCue():
+            case Exit() | PlayCue() | Emit():
                 self._record(effect)
             case _:
                 assert_never(effect)
 
-    def _record(self, effect: Exit | PlayCue) -> None:
+    def _record(self, effect: Exit | PlayCue | Emit) -> None:
         match effect:
             case Exit():
                 self.exited = True
             case PlayCue(cue):
                 self.cues.append(cue)
+            case Emit():
+                self.events.append(effect)
+
+    def _cancel(self, epochs: set[Epoch]) -> None:
+        """Drop the queued ``Generate`` jobs of ``epochs``, as the engine worker skips them.
+
+        The first job counts as running (the real worker has already taken it), so it is
+        spared and its result still arrives late, like a synthesis that cannot be interrupted.
+        """
+        if not self._jobs:
+            return
+        running, *queued = self._jobs
+        kept = [j for j in queued if not (isinstance(j, Generate) and j.chunk.epoch in epochs)]
+        self._jobs = deque([running, *kept])
 
     def _control_output(self, effect: PausePlayback | ResumePlayback | AbortPlayback) -> None:
         match effect:
