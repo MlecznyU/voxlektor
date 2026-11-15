@@ -25,7 +25,7 @@ domain | contracts   pure logic with no I/O and no numpy | public, versioned con
 src/voxlektor/
   __init__.py                 only __version__ (no imports, so that `vxl` starts fast)
   __main__.py                 -> entrypoints.cli.app:main
-  bundled_voices/<12>/{ref.wav,ref.txt,voice.toml}
+  bundled_voices/<8>/{ref.wav,ref.txt,voice.toml}
   bundled_cues/stopped_en.wav the STOPPED cue; made once by scripts/make_cues.py (real OmniVoice)
 
   contracts/                  PUBLIC, VERSIONED

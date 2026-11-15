@@ -114,9 +114,7 @@ Exit codes: `0` ok, `1` user error (bad input or option, unknown voice, invalid 
 `3` unsupported platform, `130` interrupted with Ctrl+C.
 
 Bundled voices: `v0-default`, `f1-warm`, `f2-narrator`, `f3-bright`, `m1-calm`, `m2-narrator`,
-`m3-casual`, and five warm female voices for longer conversations: `grace-velvet` (warmest,
-deep, unhurried), `zoe-spark` (cheerful, quick), `claire-steady` (clear and even, for daily
-work), `nora-amber` (warm, low) and `lily-silk` (soft, delicate).
+`m3-casual`, `zoe-spark` (cheerful, quick).
 
 ## Configuration
 
@@ -245,9 +243,9 @@ downloaded from Hugging Face on first use (or by `vxl setup`) and comes with its
   Emilia dataset). OmniVoice's own code is Apache 2.0.
 - The model's **audio tokenizer** is derived from Higgs Audio v2 and is subject to Boson AI's
   own license for it.
-- The **12 bundled voices** (`src/voxlektor/bundled_voices`) are synthetic: each reference sample
-  was designed from a text description with VoxCPM2 (Apache 2.0), some then equalised or
-  loudness-normalised. They are not recordings of real people.
+- The **8 bundled voices** (`src/voxlektor/bundled_voices`) are synthetic: each reference sample
+  was designed from a text description with VoxCPM2 (Apache 2.0). They are not recordings of
+  real people.
 - Do not use voxlektor to clone or impersonate anyone's voice without their consent, or for
   fraud or deception. Check that your use complies with the model licenses and the law where you
   live; you are responsible for how you use it.

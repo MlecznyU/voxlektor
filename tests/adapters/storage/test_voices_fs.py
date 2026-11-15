@@ -9,16 +9,12 @@ from voxlektor.contracts.engine import VoiceRef
 from voxlektor.domain.errors import UnknownVoice
 
 BUNDLED = [
-    "claire-steady",
     "f1-warm",
     "f2-narrator",
     "f3-bright",
-    "grace-velvet",
-    "lily-silk",
     "m1-calm",
     "m2-narrator",
     "m3-casual",
-    "nora-amber",
     "v0-default",
     "zoe-spark",
 ]

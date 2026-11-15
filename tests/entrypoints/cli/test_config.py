@@ -33,7 +33,7 @@ def test_config_voice_unknown_lists_names_and_writes_nothing(
     assert main(["config", "voice", "nobody"]) == 1
     err = capsys.readouterr().err
     assert "unknown voice 'nobody'" in err
-    assert "available: claire-steady, f1-warm, f2-narrator" in err
+    assert "available: f1-warm, f2-narrator" in err
     assert "v0-default" in err
     assert _config(home).read_text() == before
 
