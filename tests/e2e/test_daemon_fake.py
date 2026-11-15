@@ -6,6 +6,7 @@ event loop; the test talks to it with a blocking client, as the CLI will.
 
 import asyncio
 import os
+import socket
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from voxlektor.adapters.platform.macos import MacOSPlatform
 from voxlektor.adapters.storage.settings_toml import TomlSettingsStore
 from voxlektor.bootstrap.daemon import build_daemon
 from voxlektor.contracts import protocol as p
+from voxlektor.contracts.codec import decode_reply
 from voxlektor.domain.settings import Settings, merge_layers
 from voxlektor.domain.types import ChunkId
 
@@ -109,7 +111,7 @@ def test_speak_then_status_warm_then_shutdown_removes_socket_and_pid(daemon: _Ru
     speak = request(daemon.socket, _line("speak", text="Hello there, this is a test.", lang="en"))
     assert speak.ok
     assert speak.id == "speak-1"
-    assert speak.data == {"chunks": 1}
+    assert speak.data == {"chunks": 1, "group": "g1"}
     assert daemon.output.first_start.wait(TIMEOUT)
     status = request(daemon.socket, _line("status"))
     assert status.ok
@@ -148,9 +150,13 @@ def test_protocol_errors_come_back_as_error_replies(daemon: _Running) -> None:
     unknown = request(daemon.socket, b'{"v":1,"id":"u","cmd":"dance"}\n')
     assert unknown.error is not None
     assert unknown.error.code is p.ErrorCode.unknown_command
-    subscribe = request(daemon.socket, _line("subscribe"))
-    assert subscribe.error is not None
-    assert subscribe.error.code is p.ErrorCode.unsupported
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:  # a stream now: first line
+        sock.settimeout(TIMEOUT)
+        sock.connect(str(daemon.socket))
+        sock.sendall(_line("subscribe"))
+        subscribe = decode_reply(sock.makefile("rb").readline())
+    assert subscribe.ok
+    assert subscribe.data == {}
     voice = request(daemon.socket, _line("speak", text="hello", voice="nobody"))
     assert voice.error is not None
     assert voice.error.code is p.ErrorCode.unknown_voice

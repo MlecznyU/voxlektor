@@ -7,8 +7,10 @@ import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import msgspec
 import pytest
 
+import voxlektor
 from tests.fixtures.sockets import TIMEOUT, request, wait_for_file
 from voxlektor.adapters.audio import cues as cues_module
 from voxlektor.adapters.audio import sounddevice_out
@@ -130,12 +132,51 @@ def test_default_platform_installs_bundled_voices_under_the_config_dir(
         runner = asyncio.create_task(built.run())
         status = await built.loop.handle(Status())
         assert status.data["state"] == "cold"
+        assert status.data["version"] == voxlektor.__version__
         await built.loop.handle(Shutdown())
         await asyncio.wait_for(runner, TIMEOUT)
 
     asyncio.run(main())
     assert (short_tmp / "config" / "voices" / "v0-default" / "voice.toml").is_file()
     assert not (short_tmp / "run" / "voxlektor.sock").exists()
+
+
+# ------------------------------------------------------------------ subscribe
+
+
+@pytest.mark.usefixtures("no_leaked_threads")
+def test_subscribe_streams_the_snapshot_and_the_session_events(short_tmp: Path) -> None:
+    platform = MacOSPlatform(short_tmp)
+    built = build_daemon(FAKE, transport=True, platform=platform, output=MemoryOutput())
+    serving = _Serving(built)
+    frames: list[dict[str, object]] = []
+    try:
+        wait_for_file(platform.pid_path())
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(TIMEOUT)
+            sock.connect(str(platform.socket_path()))
+            sock.sendall(b'{"v":1,"id":"w","cmd":"subscribe"}\n')
+            stream = sock.makefile("rb")
+            reply = msgspec.json.decode(stream.readline(), type=dict[str, object])
+            snapshot = msgspec.json.decode(stream.readline(), type=p.Event)
+            assert request(platform.socket_path(), SPEAK).ok
+            while not frames or frames[-1] != {"event": "drained", "owner": None}:
+                event = msgspec.json.decode(stream.readline(), type=p.Event)
+                frames.append({"event": event.event, "owner": event.data.get("owner")})
+                if event.event == "state":
+                    assert event.data["state"].isupper()  # lifecycle names as in status
+            request(platform.socket_path(), SHUTDOWN)
+            assert stream.read() == b""  # the stream ends with the daemon
+    finally:
+        serving.join()
+    assert reply == {"v": 1, "id": "w", "ok": True, "data": {}}
+    assert snapshot.event == "snapshot"
+    assert snapshot.data["state"] == "COLD"
+    assert "subscribe" in snapshot.data["caps"]
+    assert snapshot.data["groups"] == []
+    assert {"event": "tag_finished", "owner": "cli"} not in frames  # untagged speech
+    assert {"event": "floor", "owner": "cli"} in frames
+    assert serving.errors == []
 
 
 # ------------------------------------------------------------------ failures

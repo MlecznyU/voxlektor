@@ -24,31 +24,35 @@ class Speak:
     volume: int | None = field(default=None, kw_only=True)
     rate: float | None
     now: bool
+    owner: str | None = field(default=None, kw_only=True)
+    group: str | None = field(default=None, kw_only=True)
+    tag: str | None = field(default=None, kw_only=True)
+    preempt: bool = field(default=False, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
 class Pause:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Resume:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Skip:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Back:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class StopReading:
-    pass
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,9 +74,16 @@ class Unload:
 
 @dataclass(frozen=True, slots=True)
 class Shutdown:
-    pass
+    """Stop the daemon; with ``if_idle`` refused (``busy``) while any owner has a reading."""
+
+    if_idle: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Load:
+    """Warm the engine without reading (daemon-wide, owner-less); then the usual idle timeout."""
 
 
 type Command = (
-    Speak | Pause | Resume | Skip | Back | StopReading | Status | SetIdle | Unload | Shutdown
+    Speak | Pause | Resume | Skip | Back | StopReading | Status | SetIdle | Unload | Shutdown | Load
 )

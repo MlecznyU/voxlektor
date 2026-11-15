@@ -1,13 +1,17 @@
 """The speak path: where the text comes from, autostart, and one-shot mode."""
 
 import io
+import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from tests.entrypoints.cli.conftest import FakeWire
+from voxlektor.app.ports import PlatformInfo
+from voxlektor.bootstrap import client
 from voxlektor.contracts.protocol import MAX_FRAME
 from voxlektor.domain.settings import Settings
 from voxlektor.entrypoints import oneshot
@@ -233,3 +237,65 @@ def test_volume_reaches_one_shot_mode(wire: FakeWire, monkeypatch: pytest.Monkey
     monkeypatch.setattr(oneshot, "run", fake_run)
     assert main(["--volume", "80", "hello"]) == 0
     assert [s.volume for s in seen] == [80]
+
+
+def test_owner_group_tag_preempt_reach_the_request(wire: FakeWire) -> None:
+    argv = ["say", "--owner", "pi", "--group", "g1", "--tag", "t1", "--preempt", "hello"]
+    assert main(argv) == 0
+    ((req),) = wire.requests
+    assert (req["owner"], req["group"], req["tag"], req["preempt"]) == ("pi", "g1", "t1", True)
+
+
+def test_absent_owner_group_tag_preempt_are_not_sent(wire: FakeWire) -> None:
+    assert main(["say", "hello"]) == 0
+    ((req),) = wire.requests
+    assert not {"owner", "group", "tag", "preempt"} & req.keys()
+
+
+def test_reserved_owner_exits_2_with_the_daemon_message(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.fail("speak", "invalid_argument", "owner 'cli' is reserved")
+    assert main(["say", "--owner", "cli", "hello"]) == 1
+    assert "reserved" in capsys.readouterr().err
+
+
+def test_say_json_prints_the_reply_data(wire: FakeWire, capsys: pytest.CaptureFixture[str]) -> None:
+    wire.replies["speak"] = {"ok": True, "data": {"queued": 1, "group": "g1"}}
+    assert main(["say", "--json", "--group", "g1", "hello"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"queued": 1, "group": "g1"}
+
+
+def _outdated_busy(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An older daemon that refuses ``shutdown if_idle`` because another session is reading."""
+    wire.replies["status"] = {"ok": True, "data": {"version": "0.0.1", "queued": 0}}
+    wire.fail("shutdown", "busy", "the daemon is reading")
+
+    def ensure(platform: PlatformInfo, ping: Callable[[], bool]) -> None:
+        assert ping()
+
+    monkeypatch.setattr(client, "ensure_daemon", ensure)
+
+
+def test_outdated_busy_daemon_reported(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _outdated_busy(wire, monkeypatch)
+    wire.replies["speak"] = {"ok": True, "data": {"chunks": 1, "group": "g1"}}
+    assert main(["say", "--json", "hello"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "chunks": 1,
+        "group": "g1",
+        "daemon_outdated": True,
+    }
+    assert wire.cmds == ["status", "shutdown", "speak"]
+    assert wire.requests[1] == {"cmd": "shutdown", "if_idle": True}
+
+
+def test_outdated_busy_daemon_without_json_prints_nothing(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _outdated_busy(wire, monkeypatch)
+    assert main(["say", "hello"]) == 0
+    assert capsys.readouterr().out == ""
+    assert wire.cmds == ["status", "shutdown", "speak"]

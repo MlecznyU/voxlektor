@@ -59,17 +59,29 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `--lang`, `-l auto\|pl\|en` | Language for this reading. |
 | `--rate`, `-r 0.5..3.0` | Playback rate for this reading. |
 | `--volume 0..100` | Volume for this reading; 50 = the even, normalised level. |
-| `--now` | Replace the current reading instead of queueing. |
+| `--now` | Replace the current reading instead of queueing (only readings of the same owner). |
 | `-f FILE` | Read the text from FILE (not together with TEXT). |
+| `--owner X`, `--group G` | Read as owner X (a client name; `cli`, the plain CLI's own, is reserved) in group G (read without interruption). See [Many clients](#many-clients-at-once). |
+| `--tag T` | Label this text; `vxl watch` reports when it starts and finishes. |
+| `--preempt` | Take the floor from another owner at once (its reading resumes afterwards). |
+| `--json` | One JSON line: the reply (`chunks`, `group`), plus `"daemon_outdated": true` when an older daemon had to be kept. |
 | `vxl pause` / `resume` | Pause and resume the reading. |
 | `vxl skip` / `back` | Next chunk / previous chunk. |
 | `vxl stop-reading` | Stop the reading; the engine stays warm. |
+| `--owner X` | On `pause`, `resume`, `skip`, `back`, `stop-reading`: act on owner X's readings only. |
 | `vxl status` | State, engine, voice, idle timer, last reading metrics; `OFF` when no daemon runs. |
+| `--json` | One JSON line for tools: `{"running": false}`, or `{"running": true, ...}` with the [protocol `status` fields](docs/protocol.md#status). |
 | `vxl idle DUR` | Set the idle timeout live: `0` (never unload), `90s`, `10m`, `1h`. |
 | `vxl unload` | Free the model from RAM now; the daemon keeps running. |
 | `vxl stop` | Stop the daemon (`not running` and exit 0 when none runs). |
 | `vxl serve [--idle DUR]` | Run the daemon in the foreground (normally autostarted). |
+| `vxl warm` | Start the daemon if needed and load the model now, so the next reading starts quickly; returns at once (the usual idle timeout follows). |
+| `vxl watch` | Print the daemon's events as they happen, one line each, until it goes away (exit 2; Ctrl+C or SIGTERM: exit 0). Waits for a daemon that is not running. |
+| `--json` | One JSON object per line: the event's data plus `"event"`; the first is `snapshot` (the status). |
+| `--owner X` | Only X's events, every `floor`, `state`, and daemon-wide `drained`/`error`/`paused`/`resumed`. |
+| `--start` | Start the daemon first when it is not running. The line protocol is in [docs/protocol.md](docs/protocol.md#vxl-watch). |
 | `vxl voices` | List voices; `*` marks the default. |
+| `--json` | One JSON line for tools: `{"default": NAME, "voices": [...]}`. |
 | `vxl config voice NAME` | Set the default voice. |
 | `vxl config show` | Show the effective settings in the `config.toml` layout. |
 | `vxl setup` | Guided setup with menus and samples (required once before reading; re-runnable). |
@@ -77,6 +89,22 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `--engine E`, `--voice V`, `--base-lang pl\|en` | Values for `--yes`. |
 | `--rate R`, `--volume N`, `--idle DUR`, `--autostart/--no-autostart` | Values for `--yes`. |
 | `--accept-model-license` | Needed with `--yes` when the model still has to be downloaded. |
+| `--check` | Change nothing; print one JSON line (`ready`, `setup_completed`, `version`, `engine`, `model` with `present` and its license, effective `settings`, `features`: what this version offers, e.g. `["owners", "tags", "warm", "watch"]`); exit `0` when ready, `1` if not. |
+
+### Many clients at once
+
+Several clients (for example dialogue-box in several Claude Code sessions, plus you at the
+keyboard) share one daemon. Each names itself with `--owner`; readings queue in groups, and the
+floor passes only at a group boundary to the oldest waiting group, so nobody cuts anybody off.
+`--now`, `pause`, `skip`, `back` and `stop-reading` with `--owner` touch only that owner's
+readings; without `--owner` they act on whatever is speaking (and `vxl pause` holds the whole
+daemon until `vxl resume`). A paused owner keeps the floor for `floor_grace` (8 s) once someone
+else waits. Details: [docs/protocol.md](docs/protocol.md#owners-groups-and-the-floor).
+
+After `uv tool upgrade voxlektor` (or pulling a checkout), the next `vxl say`, `vxl warm` or
+`vxl watch` replaces an older daemon when it is idle; when it is reading, the old one is kept
+until `vxl stop`. If you pulled changes to `pyproject.toml` entry points (new engines, new
+commands), reinstall: `uv tool install --editable . --reinstall`.
 
 Until `vxl setup` has completed, reading exits `1` with `voxlektor is not set up yet; run: vxl
 setup`; control commands keep working.
@@ -86,7 +114,9 @@ Exit codes: `0` ok, `1` user error (bad input or option, unknown voice, invalid 
 `3` unsupported platform, `130` interrupted with Ctrl+C.
 
 Bundled voices: `v0-default`, `f1-warm`, `f2-narrator`, `f3-bright`, `m1-calm`, `m2-narrator`,
-`m3-casual`.
+`m3-casual`, and five warm female voices for longer conversations: `grace-velvet` (warmest,
+deep, unhurried), `zoe-spark` (cheerful, quick), `claire-steady` (clear and even, for daily
+work), `nora-amber` (warm, low) and `lily-silk` (soft, delicate).
 
 ## Configuration
 
@@ -94,7 +124,7 @@ Precedence: command-line flag > environment variable > `config.toml` > default. 
 in `~/.config/voxlektor/config.toml`; `vxl config voice NAME` writes it, and `vxl config show`
 prints what is in effect. `voice`, `lang`, `base_lang`, `rate` and `volume` travel with every request, so a
 change applies to the next reading of a running daemon. `engine`, `history` and
-`service.idle_timeout` are read when the daemon starts (`vxl idle` changes the timeout live).
+`service.idle_timeout` and `service.floor_grace` are read when the daemon starts (`vxl idle` changes the timeout live).
 
 ```toml
 config_version = 1
@@ -109,6 +139,7 @@ history = 20        # chunks kept for `vxl back`
 [service]
 idle_timeout = "10m"   # 0, 90s, 10m, 1h; 0 = never unload
 autostart = true       # false = read in the calling process, without a daemon
+floor_grace = "8s"     # how long a paused owner keeps the floor while another waits; 0 = at once
 ```
 
 | `config.toml` key | Environment variable | Default |
@@ -121,6 +152,7 @@ autostart = true       # false = read in the calling process, without a daemon
 | `volume` | `VOXLEKTOR_VOLUME` | `50` |
 | `service.idle_timeout` | `VOXLEKTOR_IDLE_TIMEOUT` | `10m` |
 | `service.autostart` | `VOXLEKTOR_AUTOSTART` | `true` |
+| `service.floor_grace` | `VOXLEKTOR_FLOOR_GRACE` | `8s` |
 | `history` | none | `20` |
 | none | `VOXLEKTOR_HOME` | unset: config in `~/.config/voxlektor`, runtime files in `~/Library/Application Support/voxlektor`. Set to a directory to keep both under `<dir>/config` and `<dir>/run` instead. |
 | none | `VOXLEKTOR_OUTPUT` | Test-only: `memory` plays nothing and records instead. Never needed for normal use. |
@@ -213,9 +245,9 @@ downloaded from Hugging Face on first use (or by `vxl setup`) and comes with its
   Emilia dataset). OmniVoice's own code is Apache 2.0.
 - The model's **audio tokenizer** is derived from Higgs Audio v2 and is subject to Boson AI's
   own license for it.
-- The **7 bundled voices** (`src/voxlektor/bundled_voices`) are synthetic: each reference sample
-  was designed from a text description with VoxCPM2 (Apache 2.0). They are not recordings of
-  real people.
+- The **12 bundled voices** (`src/voxlektor/bundled_voices`) are synthetic: each reference sample
+  was designed from a text description with VoxCPM2 (Apache 2.0), some then equalised or
+  loudness-normalised. They are not recordings of real people.
 - Do not use voxlektor to clone or impersonate anyone's voice without their consent, or for
   fraud or deception. Check that your use complies with the model licenses and the law where you
   live; you are responsible for how you use it.

@@ -90,6 +90,7 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.adapters.engines.omnivoice_model",
     "voxlektor.adapters.models.hf_cache",
     "voxlektor.app.setup",
+    "voxlektor.adapters.transport.unix_stream",
 )
 # Typer applications as "module:attribute", extended by the CLI task.
 FROZEN_CLI: tuple[str, ...] = ("voxlektor.entrypoints.cli.app:app",)

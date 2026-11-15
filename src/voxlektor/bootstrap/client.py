@@ -15,11 +15,12 @@ import platform as host
 import sys
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import msgspec
 
+import voxlektor
 from voxlektor.adapters.procs.spawn import ensure_daemon
 from voxlektor.adapters.storage.settings_toml import TomlSettingsStore
 from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
@@ -32,6 +33,7 @@ from voxlektor.domain.errors import (
     DomainError,
     InvalidDuration,
     InvalidSetting,
+    NotRunning,
     ServiceUnavailable,
 )
 from voxlektor.domain.settings import Settings, merge_layers
@@ -43,6 +45,8 @@ _PING_TIMEOUT_S = 1.0
 _SAMPLE_POLL_S = 0.2
 _SAMPLE_TIMEOUT_S = 120.0
 _NOT_WARM = frozenset({"cold", "loading"})
+_GONE_WAIT_S = 5.0  # an outdated daemon removing its socket and pid file
+_GONE_POLL_S = 0.1
 
 # Replaced by tests (fake clock); production uses the real ones.
 _sleep = time.sleep
@@ -55,6 +59,8 @@ class ClientContext:
     platform: PlatformInfo
     store: SettingsStore
     config_path: Path
+    # Set by ``ensure(work=True)``; read through ``daemon_outdated``.
+    _outdated: list[bool] = field(default_factory=list[bool], init=False, repr=False, compare=False)
 
     def send(self, cmd: str, **args: object) -> dict[str, object]:
         """One request to the daemon; the reply's data, or the reply's error raised."""
@@ -66,9 +72,46 @@ class ClientContext:
             raise DomainError(reply.error.code.value, reply.error.message)
         return dict(reply.data or {})
 
-    def ensure(self) -> None:
-        """Make sure a daemon answers, autostarting one if needed."""
-        ensure_daemon(self.platform, self._ping)
+    def ensure(self, *, work: bool = False) -> None:
+        """Make sure a daemon answers, autostarting one if needed.
+
+        With ``work`` (the commands that start work: ``say``, ``warm``, ``watch``) a daemon whose
+        status ``version`` differs from this CLI's (or has none) is replaced when it is idle:
+        ``shutdown`` with ``if_idle``, wait until its socket and pid file are gone, start a fresh
+        one. A daemon that is reading (it reports so, or refuses with ``busy``) is kept and
+        ``daemon_outdated`` becomes true, so no other session's speech is ever dropped. The
+        version comes from the ping's ``status`` reply, so a current daemon costs no extra
+        request. Daemons from before ``if_idle`` ignore the field; they are only asked when their
+        status shows nothing queued or playing.
+        """
+        seen: list[Mapping[str, object]] = []
+        ensure_daemon(self.platform, lambda: self._ping(seen))
+        if not work or not seen or seen[-1].get("version") == voxlektor.__version__:
+            return
+        if self._stop_outdated(seen[-1]):
+            ensure_daemon(self.platform, lambda: self._ping([]))
+
+    @property
+    def daemon_outdated(self) -> bool:
+        """True after ``ensure(work=True)`` kept a daemon older than this CLI (it was busy)."""
+        return bool(self._outdated)
+
+    def _stop_outdated(self, status: Mapping[str, object]) -> bool:
+        """Stop an outdated daemon when it is idle; True when a fresh one must be started."""
+        queued = status.get("queued") or status.get("groups")
+        if status.get("playing") is True or bool(queued):
+            self._outdated.append(True)
+            return False
+        try:
+            self.send("shutdown", if_idle=True)
+        except NotRunning:
+            return True  # gone already
+        except DomainError:  # ``busy``, or any other refusal: keep it and say so
+            self._outdated.append(True)
+            return False
+        if not _wait_gone(self.platform.socket_path(), self.platform.pid_path()):
+            self._outdated.append(True)  # still there: the fresh start may reach the old one
+        return True
 
     def catalog(self) -> VoiceCatalog:
         """The local voice catalog, with the bundled voices installed."""
@@ -76,12 +119,27 @@ class ClientContext:
         catalog.ensure_bundled()
         return catalog
 
-    def _ping(self) -> bool:
+    def _ping(self, seen: list[Mapping[str, object]]) -> bool:
+        """A short ``status``; the data of an answer is appended to ``seen``."""
         try:
             reply = request(self.platform.socket_path(), {"cmd": "status"}, _PING_TIMEOUT_S)
         except ServiceUnavailable:
             return False
-        return reply.get("ok") is True
+        if reply.get("ok") is not True:
+            return False
+        data = reply.get("data")
+        seen.append(msgspec.convert(data, dict[str, object]) if isinstance(data, dict) else {})
+        return True
+
+
+def _wait_gone(*paths: Path) -> bool:
+    """Wait until none of ``paths`` exists; False when one is still there after a while."""
+    deadline = _monotonic() + _GONE_WAIT_S
+    while any(path.exists() for path in paths):
+        if _monotonic() >= deadline:
+            return False
+        _sleep(_GONE_POLL_S)
+    return True
 
 
 def build_client(flags: Mapping[str, object]) -> ClientContext:

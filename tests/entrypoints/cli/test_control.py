@@ -1,5 +1,6 @@
 """Control commands: playback, idle, unload, stop, status and serve."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -162,6 +163,30 @@ def test_status_error_reply_is_reported(wire: FakeWire) -> None:
     assert main(["status"]) == 2
 
 
+def test_status_json_when_not_running(wire: FakeWire, capsys: pytest.CaptureFixture[str]) -> None:
+    wire.replies["status"] = NotRunning()
+    assert main(["status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"running": False}
+
+
+def test_status_json_is_the_daemon_status_plus_running(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.replies["status"] = {"ok": True, "data": STATUS}
+    assert main(["status", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1  # one line, for tools
+    assert json.loads(out) == {"running": True, **STATUS}
+
+
+def test_status_json_of_an_unresponsive_daemon_exits_2_without_json(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.fail("status", "internal", "the service is shutting down")
+    assert main(["status", "--json"]) == 2
+    assert capsys.readouterr().out == ""
+
+
 def test_serve_passes_the_idle_override(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Settings] = []
 
@@ -191,3 +216,18 @@ def test_serve_with_an_invalid_idle_exits_1(
 ) -> None:
     assert main(["serve", "--idle", "5x"]) == 1
     assert "invalid duration" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("command", "wire_cmd"),
+    [
+        ("pause", "pause"),
+        ("resume", "resume"),
+        ("skip", "skip"),
+        ("back", "back"),
+        ("stop-reading", "stop_reading"),
+    ],
+)
+def test_owner_flag_is_sent_only_when_given(wire: FakeWire, command: str, wire_cmd: str) -> None:
+    assert main([command, "--owner", "pi"]) == 0
+    assert wire.requests == [{"cmd": wire_cmd, "owner": "pi"}]

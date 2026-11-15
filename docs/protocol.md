@@ -17,33 +17,38 @@ by hand). Golden examples: `tests/contracts/protocol_v1/{requests,replies}.jsonl
 - Reply: `{"v":1,"id":"...","ok":true,"data":{...}}` or
   `{"v":1,"id":"...","ok":false,"error":{"code":"...","message":"..."}}`.
   `id` is `null` only when the request carried no readable id.
-- Event envelope `{"v":1,"event":"...","data":{...}}` is defined but reserved: no events are
-  sent in the MVP.
+- Event envelope `{"v":1,"event":"...","data":{...}}`: sent only on a connection that sent
+  `subscribe` (added within v1 S1; see [Events](#events)).
+
+Several clients share one daemon (for example one dialogue-box per Claude Code session plus the
+person's own `vxl`). How their readings queue and what each control command touches is in
+[Owners, groups and the floor](#owners-groups-and-the-floor).
 
 ## Commands
 
 | cmd | arguments | reply `data` |
 |---|---|---|
-| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces the current reading), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it) | `{"chunks": N}`: number of planned chunks (0 for empty or whitespace-only text) |
-| `pause` | none | `{}` |
-| `resume` | none | `{}` |
-| `skip` | none | `{}` |
-| `back` | none | `{}` |
-| `stop_reading` | none | `{}` |
+| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces all of this owner's readings, see [`now`](#speak-now-and-preempt)), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it), and, added within v1 S1 (earlier daemons ignore them): `owner?` (client id matching `^[A-Za-z0-9._:-]{1,64}$`; `cli` is reserved; default: the owner `cli`), `group?` (1 to 128 characters; default: a fresh daemon-chosen group), `tag?` (1 to 128 characters; labels every chunk of this speak, see [Tags](#tags)), `preempt?` (default false; true takes the floor at once) | `{"chunks": N, "group": "<id>"}`: number of planned chunks and the group they joined (a daemon-chosen `g<n>` when the request named none; added within v1 S1); `{"chunks": 0}` for empty or whitespace-only text (nothing is queued, no event is sent) |
+| `pause` | `owner?` (added within v1 S1) | `{}` |
+| `resume` | `owner?` | `{}` |
+| `skip` | `owner?` | `{}` |
+| `back` | `owner?` | `{}` |
+| `stop_reading` | `owner?` | `{}` |
 | `status` | none | status object (below) |
 | `idle` | `timeout`: duration string such as `"0"`, `"90s"`, `"10m"` | `{"idle_timeout_s": seconds}`: the timeout now in effect, an integer |
 | `unload` | none | `{}` |
-| `shutdown` | none | `{}` |
-| `subscribe` | none | reserved; always `unsupported` in the MVP |
+| `shutdown` | `if_idle?` (default false; true: refuse with `busy` while anything is queued or playing for any owner, decided atomically in the daemon, so no client's reading is dropped; added within v1 S1, earlier daemons ignore it and always shut down) | `{}` |
+| `load` | none | `{}` once the engine load is requested (not finished); nothing is read; the usual idle timeout follows, and a warm idle engine restarts it (added within v1 S1, in `caps`) |
+| `subscribe` | none | `{}`; then the connection becomes an event stream: first a `snapshot` event (the status object as `data`), then every event in the order the daemon produced it; lines sent afterwards are ignored; a subscriber that falls 1000 events behind is disconnected (added within v1 S1, in `caps`; earlier daemons answer `unsupported`; see [Events](#events)) |
 
 Examples:
 
 ```
 > {"cmd":"speak","v":1,"id":"1","text":"Hello world.","voice":"m1-calm","lang":"en","rate":1.25,"now":true}
-< {"v":1,"id":"1","ok":true,"data":{"chunks":1}}
+< {"v":1,"id":"1","ok":true,"data":{"chunks":1,"group":"g1"}}
 
 > {"cmd":"speak","v":1,"id":"1a","text":"A little louder.","volume":70}
-< {"v":1,"id":"1a","ok":true,"data":{"chunks":1}}
+< {"v":1,"id":"1a","ok":true,"data":{"chunks":1,"group":"g1"}}
 
 > {"cmd":"idle","v":1,"id":"2","timeout":"10m"}
 < {"v":1,"id":"2","ok":true,"data":{"idle_timeout_s":600}}
@@ -52,7 +57,16 @@ Examples:
 < {"v":1,"id":"3","ok":false,"error":{"code":"invalid_duration","message":"invalid duration '5x'; use 0, 90s, 10m or 1h"}}
 
 > {"cmd":"subscribe","v":1,"id":"4"}
-< {"v":1,"id":"4","ok":false,"error":{"code":"unsupported","message":"subscribe is not supported yet"}}
+< {"v":1,"id":"4","ok":true,"data":{}}
+
+> {"cmd":"speak","v":1,"id":"4a","text":"First paragraph.","owner":"s1","group":"r7","tag":"r7p0","now":true}
+< {"v":1,"id":"4a","ok":true,"data":{"chunks":1,"group":"r7"}}
+
+> {"cmd":"pause","v":1,"id":"4b","owner":"s1"}
+< {"v":1,"id":"4b","ok":true,"data":{}}
+
+> {"cmd":"pause","v":1,"id":"4c","owner":"cli"}
+< {"v":1,"id":"4c","ok":false,"error":{"code":"invalid_argument","message":"owner 'cli' is reserved"}}
 
 > {"cmd":"pause","v":1,"id":"5"}
 < {"v":1,"id":"5","ok":true,"data":{}}
@@ -72,9 +86,19 @@ Examples:
 > {"cmd":"unload","v":1,"id":"11"}
 < {"v":1,"id":"11","ok":true,"data":{}}
 
+> {"cmd":"load","v":1,"id":"13"}
+< {"v":1,"id":"13","ok":true,"data":{}}
+
+> {"cmd":"shutdown","v":1,"id":"14","if_idle":true}
+< {"v":1,"id":"14","ok":true,"data":{}}
+
 > {"cmd":"shutdown","v":1,"id":"12"}
 < {"v":1,"id":"12","ok":true,"data":{}}
 ```
+
+While a reading is queued or playing, `{"cmd":"shutdown","v":1,"id":"15","if_idle":true}` is
+answered `{"v":1,"id":"15","ok":false,"error":{"code":"busy","message":"the daemon is reading"}}`
+and the daemon keeps running.
 
 Cues (the short sounds for stopped, error and so on) are local audio only; they are not part of the
 protocol.
@@ -86,8 +110,10 @@ protocol.
 < {"v":1,"id":"6","ok":true,"data":{"state":"WARM","engine":"omnivoice","voice":"v0-default",
     "idle_timeout_s":600,"idle_remaining_s":590.5,"queued":0,"playing":false,"paused":false,
     "underruns":0,"first_audio_s":0.42,"chunks":3,"gen_seconds":1.5,"audio_seconds":9.0,
-    "last_error":null,"caps":["back","idle","pause","resume","shutdown","skip","speak",
-    "status","stop_reading","unload"]}}
+    "last_error":null,"caps":["back","idle","load","pause","resume","shutdown","skip","speak",
+    "status","stop_reading","subscribe","unload"],"floor":{"owner":"cli","group":"g1"},"waiting":0,
+    "groups":[{"owner":"cli","group":"g1","position":0,"paused":false}],"tag":null,
+    "version":"0.1.0"}}
 ```
 
 (The reply is a single line on the wire.)
@@ -107,11 +133,232 @@ protocol.
 | `chunks`, `gen_seconds`, `audio_seconds` | metrics of the latest reading |
 | `last_error` | message of the engine or audio failure that stopped the latest reading, `null` if none; cleared when a new reading starts from idle |
 | `caps` | wire command names this daemon supports (sorted) |
+| `floor` | `{"owner": ..., "group": ...}` of the group holding the floor, `null` when none (added within v1 S1; requests without `owner` belong to the owner `cli`) |
+| `waiting` | number of queued groups not holding the floor (added within v1 S1) |
+| `groups` | every queued group in play order: `{"owner", "group", "position", "paused"}`; `position` `0` = the floor holder, `1` = next; groups of paused (passed-over) owners last with `position: null`; `paused` is that owner's pause flag (added within v1 S1) |
+| `tag` | the `speak` tag of the chunk playing, else of the floor group's next chunk, else `null` (added within v1 S1) |
+| `version` | the daemon's package version, e.g. `"0.1.0"` (added within v1 S1; missing on earlier daemons). A CLI command that starts work (`say`, `warm`, `watch`) and finds a different (or no) version replaces the daemon when it is idle (`shutdown` with `if_idle`, then a fresh start); when it is busy the daemon is kept and that command's `--json` output carries `"daemon_outdated": true` |
 
 ### caps
 
-`caps` lists the `cmd` values the daemon accepts. `subscribe` is not listed because it returns
-`unsupported`. Clients must check `caps` before using a command added after v1.0.
+`caps` lists the `cmd` values the daemon accepts. `subscribe` and `load` are listed from v1 S1 on;
+earlier daemons answer `subscribe` with `unsupported` and `load` with `unknown_command`. Clients must check `caps` before using a command added after
+v1.0.
+
+## Owners, groups and the floor
+
+Added within v1 S1. Many clients share one daemon and must never interrupt each other.
+
+| Term | Meaning |
+|---|---|
+| owner | a client identity: `^[A-Za-z0-9._:-]{1,64}$`. Requests without `owner` belong to the reserved owner `cli` (the plain CLI, the person at the keyboard, clients from before S1). A request that names `owner: "cli"` is refused with `invalid_argument` (`vxl say --owner cli` and `vxl watch --owner cli` exit 1). |
+| group | a unit read without interruption, identified by `(owner, group)` (two owners may both use `r1`). A `speak` without `group` gets a fresh group `g<n>`, returned in the reply. Appending a `speak` to an existing group keeps the group's place. |
+| floor | the group that plays (or is about to play); at most one. `status.floor`, `status.groups`, the `floor` event. |
+| grace | how long a paused floor holder keeps the floor while an eligible group waits: `[service] floor_grace` (env `VOXLEKTOR_FLOOR_GRACE`), default `8s`, `0` = hand on at once. |
+
+### Floor rule
+
+**The floor goes to the oldest waiting group whose owner is not paused.**
+
+- It is applied at a group boundary (the floor group's last chunk finished, or the group was
+  stopped or replaced) and when the grace of a paused holder runs out. A group never preempts
+  another owner's group by itself; there is no floor-change sound.
+- Age = when the group was created (its first `speak`). A group created by `now` takes the age
+  of the oldest group it replaced, so `now` keeps the owner's place in line.
+- A paused owner's waiting groups keep their age but are passed over until it resumes; their
+  audio is not generated ahead meanwhile.
+- A paused floor holder keeps the floor while nobody eligible waits, indefinitely. When an
+  eligible group waits, the holder keeps it for `floor_grace`, measured from the later of the
+  pause and the moment that waiter became eligible (it arrived, its owner resumed, or the
+  daemon-wide hold was lifted); then it **yields**: its group stays at the front with its
+  position, and its current chunk restarts from the beginning when the group gets the floor
+  back (the next boundary after its owner resumes). A resumed owner never interrupts the holder.
+- The next group is generated while the current one plays (one shared ahead window, in
+  predicted play order), so consecutive readings of different owners follow without a gap.
+
+### `speak`: `now` and `preempt`
+
+- Without `now`: appended to `(owner, group)`; a new group joins the back of the queue.
+- `now: true` replaces **all of this owner's** groups (playing and queued) by the new group;
+  other owners are untouched. When this owner holds the floor, playback switches at once; when
+  another owner holds it, the new group waits its turn (with the age of the oldest replaced
+  group). Every tag of a replaced group finishes with `replaced`. `now` lifts this owner's pause.
+  A plain-CLI (`cli`) `now` also lifts the daemon-wide hold (below): the person at the keyboard
+  starts a new reading.
+- `preempt: true` (independent of `now`; dialogue-box sends both for "play now") gives the new
+  group the floor at once. The interrupted group (another owner's) goes back to the front of
+  the queue with its position; its current chunk restarts from its beginning later and its tag
+  does not get a second `tag_started`. `floor` is sent for the new holder (and again for the
+  interrupted group when it gets the floor back). `preempt` also lifts the preempting owner's
+  own pause (`resumed` is sent). Meant only for a button the person presses.
+
+### Control commands
+
+With `owner`, a command acts only on that owner's groups:
+
+| Command | Owner holds the floor | Owner is waiting | Owner has nothing |
+|---|---|---|---|
+| `pause` | pause playback | mark the owner paused (its groups are passed over) | no-op |
+| `resume` | resume playback | unmark; its group waits for the next boundary | no-op |
+| `skip` | skip a chunk within its own groups | no-op | no-op |
+| `back` | back within its own history | no-op | no-op |
+| `stop_reading` | stop its groups; the floor passes on at once | remove its queued groups | no-op |
+
+An owner's pause is a flag on the owner, not on a group. It lifts exactly when that owner has
+nothing queued or playing any more, or on its `resume`, `stop_reading`, `speak` with `now`, or
+`speak` with `preempt`. An appended `speak` while paused stays paused; the pause survives the
+end of one group while the owner has another one queued. Every lifted pause sends `resumed`.
+
+Without `owner` (the plain CLI and old clients), `pause`, `resume`, `skip` and `back` act on
+whatever holds the floor, and `stop_reading` stops everything, as before S1. An ownerless
+`pause` is a **daemon-wide hold**, separate from owner pauses: playback pauses, no hand-over
+happens (no grace runs, nobody else starts) and owner pauses are unaffected. The hold lasts
+until an ownerless `resume`, an ownerless `stop_reading`, a plain-CLI `speak` with `now`, a
+`resume` from the owner that holds the floor (the person pressed play in the session that is
+speaking; from any other owner it does not lift the hold), or the daemon going idle. The hold
+sends `paused` / `resumed` with `owner: null`; `status.paused` shows it.
+
+### Failures
+
+- A failure tied to an owner's chunk (generation after the retries) stops **that owner's**
+  groups: its tags finish `error`, one `error` event carries that owner, the stopped cue plays.
+- A voice-prompt failure is shared by everyone reading with that voice: it stops **every owner
+  that still needs that voice** (one `error` event per stopped owner).
+- A daemon-wide failure (engine load, audio output) stops everything: every tag finishes
+  `error`, one `error` event with `owner: null`.
+- `status.last_error` shows the latest error still kept (errors are kept per owner and cleared
+  when that owner starts again from nothing).
+
+## Events
+
+Added within v1 S1 (advertised as `subscribe` in `status.caps`).
+
+- `subscribe` answers `{}` and the connection becomes a stream of event frames
+  `{"v":1,"event":"<name>","data":{...}}`, one per line. The first frame is `snapshot`, whose
+  `data` is the status object at that moment; no event falls between the snapshot and the
+  stream. A reconnecting client recovers its place from `snapshot.groups` (positions included).
+- The socket server serves `subscribe` itself, before the request mapping; a server without
+  event support (a daemon before S1) answers `unsupported`.
+- Every subscriber receives every event, in the order the daemon produced them (one writer).
+  Filtering by owner is the client's job (`vxl watch --owner`).
+- Lines the client sends after `subscribe` are ignored; the client must keep its write side
+  open (a half-close counts as gone). Closing the connection ends the subscription.
+- A subscriber that falls 1000 events behind is disconnected; events are never dropped silently
+  (the client sees the connection end).
+- **Clients must ignore unknown events and unknown fields**: new events and `data` keys may be
+  added within v1.
+
+Every `data` object has `owner` and `group` (`null` when not applicable):
+
+| event | `data` besides `owner`, `group` | when |
+|---|---|---|
+| `snapshot` | the status fields | first frame of a stream |
+| `state` | `state` (`COLD`, `LOADING`, `WARM`, `UNLOADING`) | keep-warm lifecycle changes; `owner`, `group` null |
+| `floor` | none | a group gets the floor (also after a preempt or a yield) |
+| `waiting` | `position` (1 = next) | a group is queued behind **another owner's** group; re-sent when its position changes. A group behind its own owner's group gets none. A passed-over group (paused owner) gets none until it is eligible again (`paused` explains it) |
+| `tag_started` | `tag` | the first chunk of a tagged `speak` starts playing for the first time |
+| `tag_finished` | `tag`, `reason` | exactly once per accepted tagged `speak` (see [Tags](#tags)); `group` is the group of its latest start |
+| `paused` / `resumed` | none | an owner's pause flag changes (`group` null); the daemon-wide hold: `owner` null |
+| `drained` | none | that owner has nothing queued or playing (its reading ended, it was stopped, its queued groups were removed), whether or not others wait; then `owner: null` when the whole daemon has nothing left. `group` null |
+| `error` | `code` (`engine_failed`, `audio_failed`), `message` | a failure stopped a reading (see [Failures](#failures)); sent before the `tag_finished` with `error` |
+
+Example: owner `s1` reads one tagged paragraph while `s2`'s reply waits behind it (frames
+abridged to one line each; `snapshot` data shortened):
+
+```
+{"v":1,"event":"snapshot","data":{"state":"WARM","floor":null,"groups":[],"version":"0.1.0",...}}
+{"v":1,"event":"floor","data":{"owner":"s1","group":"r7"}}
+{"v":1,"event":"tag_started","data":{"owner":"s1","group":"r7","tag":"r7p0"}}
+{"v":1,"event":"waiting","data":{"owner":"s2","group":"r3","position":1}}
+{"v":1,"event":"tag_finished","data":{"owner":"s1","group":"r7","tag":"r7p0","reason":"done"}}
+{"v":1,"event":"floor","data":{"owner":"s2","group":"r3"}}
+{"v":1,"event":"drained","data":{"owner":"s1","group":null}}
+{"v":1,"event":"tag_started","data":{"owner":"s2","group":"r3","tag":"r3p0"}}
+```
+
+Order within one change: `tag_finished` of what ended, `floor`, then the pause, `waiting` and
+`drained` differences (per-owner `drained` before `drained {owner: null}`), then `tag_started`
+of the new holder. `state` events come where the engine lifecycle changes.
+
+### Tags
+
+- `tag` labels every chunk of one `speak`; an empty plan (`chunks: 0`) emits nothing. Two
+  speaks with the same tag are separate (a tag is unique only by convention).
+- Exactly one `tag_finished` per accepted tagged `speak`, also when it never started. `reason`:
+  `done` (its last chunk finished), `skipped` (its last remaining chunk was skipped), `stopped`
+  (`stop_reading`, `unload`, `shutdown`), `replaced` (`now`), `back` (see below), `error` (its
+  reading was stopped by a failure).
+- `back` into a started, unfinished tag: `tag_finished` with `back`, then a fresh
+  `tag_started` when it plays again (and a later `tag_finished`). `back` that re-plays a tag
+  that already finished: a new `tag_started` and a new `tag_finished` (each start is paired).
+  Per speak the sequence is `started? finished (started finished)*`.
+- A yield or a preempt does not repeat `tag_started`.
+- `status.tag`: the tag of the chunk playing, else of the floor group's next chunk, else `null`.
+
+## `vxl watch`
+
+`vxl watch [--json] [--owner X] [--start]` streams the events for tools that cannot hold a
+socket. It is long-running and prints one line per event, flushed per line.
+
+- `--json`: each line is one JSON object, the frame's `data` plus `"event"`; the first is
+  `snapshot`. Without `--json`: `name key=value ...` (non-null fields), for people.
+- `--owner X` keeps X's events, every `floor`, `state`, `snapshot`, unknown events, and the
+  daemon-wide `paused`/`resumed`/`drained`/`error` with `owner: null`; other owners' `waiting`,
+  tag, pause, `drained` and `error` events are dropped. `X` must be a valid owner; `cli` is
+  refused (exit 1).
+- No daemon: `{"event":"daemon_off"}` once, then a new attempt every second. `--start` starts
+  the daemon first (as `vxl say` does).
+- The daemon goes away (or the stream breaks, or it was disconnected as a slow subscriber, or a
+  daemon to be started did not come up): `{"event":"disconnected"}` (`disconnected` without
+  `--json`), exit 2. A client respawns `vxl watch` if it wants to go on.
+- SIGTERM or SIGINT, or stdout closed by its reader: exit 0, nothing more printed. Each line is
+  written whole in one write.
+- Outdated daemon (below): the snapshot line carries `"daemon_outdated": true` when the daemon
+  is kept; when it was replaced, the old daemon's stream is not printed and the snapshot comes
+  from the fresh one. A daemon from before S1 refuses `subscribe`: it is replaced the same way
+  when idle; when it is busy (or still refuses) there is nothing to stream: `disconnected`,
+  exit 2.
+- `service.autostart = false`: replacing a daemon means starting a fresh one, so `vxl watch`
+  shuts nothing down; an outdated daemon's snapshot line just carries `"daemon_outdated": true`
+  (a pre-S1 one: `disconnected`, exit 2). `--start` still starts a daemon when none runs.
+
+## Outdated daemon
+
+After an upgrade an old daemon may still run. `status` (and `snapshot`) carry the daemon's
+`version`. The commands that start work, `vxl say`, `vxl warm` and `vxl watch`, compare it with
+the CLI's version (a missing `version` counts as different):
+
+- idle daemon: `shutdown` with `if_idle: true` (refused atomically with `busy` while anything is
+  queued or playing, so no other session's speech is dropped), wait until it is gone, start a
+  fresh one; `vxl watch` then reconnects. The CLI checks the status first: a daemon whose
+  status shows a reading is not even asked. Daemons before S1 ignore `if_idle` and always shut
+  down, so for them replacement is best effort: a reading that arrives between that status and
+  the `shutdown` is dropped (a race remains).
+- two installs of different versions (e.g. two virtualenvs) replace each other's idle daemon in
+  turn, each command of the other version swapping it again; every swap is a cold model load,
+  and a `speak` racing a swap may get `internal: the service is shutting down` (retry it).
+- busy daemon: kept; the command proceeds. `vxl say --json` and the `vxl watch` snapshot line
+  carry `"daemon_outdated": true`. `vxl stop` stops it regardless (dropping its readings); the
+  next command then starts a current one.
+- `vxl watch` checks once per run: at `--start`, or on its first snapshot.
+
+## `vxl setup --check`
+
+Changes nothing, needs no daemon, prints one JSON line; exit `0` when `ready`, `1` if not.
+Tools key their state on these fields, never on exit codes:
+
+| field | meaning |
+|---|---|
+| `ready` | `setup_completed` and the engine's model is present |
+| `setup_completed` | `vxl setup` has finished once |
+| `version` | the CLI's package version (compare with `status.version`) |
+| `config_path` | the `config.toml` in use |
+| `engine` | the effective engine id |
+| `model` | `null` for an unknown engine, else `present` (bool), `repo`, `revision`, `size_bytes`, `license_name`, `license_url`, `commercial_use` |
+| `settings` | effective settings a reading would use: `voice`, `lang`, `base_lang`, `rate`, `volume`, `idle_timeout_s`, `autostart` |
+| `features` | what this CLI and its daemon offer, sorted: `["owners", "tags", "warm", "watch"]` from S1 on; a missing feature means "update voxlektor" |
+
+New fields may be added; ignore unknown ones.
 
 ## Errors
 
@@ -124,19 +371,20 @@ does this: an unknown code becomes `ErrorCode.internal` and the original `messag
 | `bad_frame` | not a JSON object, invalid JSON, or larger than `MAX_FRAME` |
 | `bad_version` | `v` missing or not `1` |
 | `unknown_command` | `cmd` missing or not a known command |
-| `invalid_argument` | missing field or wrong type or value (for example `rate` as a string) |
+| `invalid_argument` | missing field or wrong type or value (for example `rate` as a string, or the reserved `owner: "cli"`) |
 | `unknown_voice` | no such voice; the message lists the available voices |
 | `unknown_engine` | no such engine |
 | `invalid_duration` | `idle.timeout` is not a valid duration |
 | `invalid_setting` | a value is out of its allowed range |
 | `engine_failed` | the engine failed |
 | `audio_failed` | the audio output failed |
-| `unsupported` | not supported: `subscribe`, or an unsupported platform |
+| `unsupported` | not supported: `subscribe` on a daemon before v1 S1 (golden `x11`), or an unsupported platform |
 | `internal` | unexpected daemon error |
+| `busy` | `shutdown` with `if_idle` while a reading is queued or playing (added within v1 S1) |
 
 Messages are for humans and may be reworded; clients must branch on `code`. The example messages
 for `bad_frame`, `bad_version`, `unknown_command`, `invalid_argument`, `unknown_voice`,
-`unknown_engine`, `invalid_duration`, `invalid_setting` and `unsupported` in the golden fixtures are
+`unknown_engine`, `invalid_duration`, `invalid_setting`, `unsupported` and `busy` in the golden fixtures are
 checked against the real code path; those for `engine_failed`, `audio_failed` and `internal` are
 illustrative.
 
@@ -147,5 +395,6 @@ reading and appear as `status.last_error`.
 
 Within v1, changes are strictly additive: new optional fields, new commands (advertised in
 `status.caps`), new reply `data` keys, new error codes. Nothing is renamed, removed or repurposed.
-Clients ignore unknown fields and treat an unknown `error.code` as `internal`. A breaking change
+Clients ignore unknown fields and unknown events, and treat an unknown `error.code` as
+`internal`. A breaking change
 needs `"v":2`.

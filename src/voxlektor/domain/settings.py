@@ -29,6 +29,7 @@ class Settings:
     autostart: bool = True
     history: int = 20
     ahead: int = 2
+    floor_grace_s: int = 8
 
 
 def parse_duration(s: str) -> int:
@@ -82,14 +83,14 @@ def _base_lang(value: object) -> Lang:
     raise InvalidSetting("base_lang must be one of pl, en")
 
 
-def _idle_timeout(value: object) -> int:
+def _duration_setting(key: str, value: object) -> int:
     if isinstance(value, bool):
-        raise InvalidSetting("idle_timeout must be a duration or seconds")
+        raise InvalidSetting(f"{key} must be a duration or seconds")
     if isinstance(value, str):
         return parse_duration(value)
     if isinstance(value, int) and value >= 0:
         return value
-    raise InvalidSetting("idle_timeout must be a duration or non-negative seconds")
+    raise InvalidSetting(f"{key} must be a duration or non-negative seconds")
 
 
 def _autostart(value: object) -> bool:
@@ -108,6 +109,7 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
     base_lang = base.base_lang
     rate, volume, idle_timeout_s = base.rate, base.volume, base.idle_timeout_s
     autostart, history = base.autostart, base.history
+    floor_grace_s = base.floor_grace_s
     for key, value in merged.items():
         match key:
             case "engine":
@@ -124,8 +126,11 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
                 volume = _volume(value)
             case "history":
                 history = _positive_int(key, value)
-            case "idle_timeout":
-                idle_timeout_s = _idle_timeout(value)
+            case "idle_timeout" | "floor_grace":
+                seconds = _duration_setting(key, value)
+                idle_timeout_s, floor_grace_s = (
+                    (seconds, floor_grace_s) if key == "idle_timeout" else (idle_timeout_s, seconds)
+                )
             case "autostart":
                 autostart = _autostart(value)
             case _:
@@ -139,5 +144,6 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
         volume=volume,
         idle_timeout_s=idle_timeout_s,
         autostart=autostart,
+        floor_grace_s=floor_grace_s,
         history=history,
     )

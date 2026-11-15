@@ -14,7 +14,7 @@ from voxlektor.domain.settings import merge_layers, parse_duration
 _CONFIG_VERSION = 1
 _SETUP_MARKER = "setup_completed"  # not a Settings field: written only by `vxl setup`
 _TOP_KEYS = ("engine", "voice", "lang", "base_lang", "rate", "volume", "history")
-_SERVICE_KEYS = ("idle_timeout", "autostart")
+_SERVICE_KEYS = ("idle_timeout", "autostart", "floor_grace")
 _ENV_NAMES = {
     "engine": "VOXLEKTOR_ENGINE",
     "voice": "VOXLEKTOR_VOICE",
@@ -24,6 +24,7 @@ _ENV_NAMES = {
     "volume": "VOXLEKTOR_VOLUME",
     "idle_timeout": "VOXLEKTOR_IDLE_TIMEOUT",
     "autostart": "VOXLEKTOR_AUTOSTART",
+    "floor_grace": "VOXLEKTOR_FLOOR_GRACE",
 }
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -44,7 +45,7 @@ def _coerce(key: str, raw: str, source: str) -> str | int | float | bool:
                 if lowered in _FALSE:
                     return False
                 raise ValueError(raw)
-            case "idle_timeout":
+            case "idle_timeout" | "floor_grace":
                 digits = raw.isascii() and raw.isdigit()
                 if not digits:
                     parse_duration(raw)

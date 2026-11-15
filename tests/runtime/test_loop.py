@@ -25,7 +25,7 @@ from voxlektor.app.commands import (
     StopReading,
     Unload,
 )
-from voxlektor.app.effects import CancelWake, Cue, Effect, ScheduleWake, UnloadEngine
+from voxlektor.app.effects import CancelWake, Cue, Effect, Emit, ScheduleWake, UnloadEngine
 from voxlektor.app.session import Session
 from voxlektor.app.voices import VoiceCatalog
 from voxlektor.contracts.engine import AudioChunk, Engine, VoicePrompt, VoiceRef
@@ -33,6 +33,7 @@ from voxlektor.domain.settings import Settings
 from voxlektor.domain.types import ChunkId, EngineId, Epoch
 from voxlektor.runtime.buffers import AudioBuffers
 from voxlektor.runtime.engine_worker import EngineWorker
+from voxlektor.runtime.events import EventHub
 from voxlektor.runtime.loop import CoreLoop
 from voxlektor.testing.fakes import FakeEngine, InMemoryVoiceRepository
 
@@ -631,6 +632,36 @@ def test_callbacks_before_the_loop_started_are_dropped(caplog: pytest.LogCapture
     finally:
         rig.worker.close()
     assert "before the loop started" in caplog.text
+
+
+def test_emit_is_published_to_the_hub_subscribers_in_order() -> None:
+    hub = EventHub()
+    rig = _rig()
+    out = MemoryOutput()  # the rig's output already serves the rig's core
+    core = CoreLoop(rig.session, rig.worker, out, rig.buffers, _Monotonic(), rig.cues, events=hub)
+    seen: list[tuple[str, dict[str, object]]] = []
+    hub.subscribe(lambda event, data: seen.append((event, dict(data))))
+
+    async def main() -> None:
+        core.execute([Emit("state", {"owner": None}), Emit("drained", {"group": "g"})])
+
+    try:
+        asyncio.run(main())
+    finally:
+        rig.worker.close()
+    assert seen == [("state", {"owner": None}), ("drained", {"group": "g"})]
+
+
+def test_emit_without_a_hub_is_dropped() -> None:
+    rig = _rig()
+
+    async def main() -> None:
+        rig.core.execute([Emit("state", {"owner": None}), CancelWake()])
+
+    try:
+        asyncio.run(main())  # no hub: nothing to publish to, and nothing fails
+    finally:
+        rig.worker.close()
 
 
 def test_execute_needs_a_running_loop() -> None:

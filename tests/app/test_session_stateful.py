@@ -102,6 +102,7 @@ class SessionMachine(RuleBasedStateMachine):
         # Chunks generated with an epoch below the floor belong to a stopped/replaced reading.
         self.epoch_floor = 0
         self.checked_starts = 0
+        self.finished_any = False  # a chunk played to the end (an ownerless back can target it)
         self.error_stops = 0  # readings stopped on an error, seen as a new last_error
         self.play_failures = 0
         # A superset of the voices the current reading uses (reset when a reading starts).
@@ -176,10 +177,18 @@ class SessionMachine(RuleBasedStateMachine):
     @rule()
     def back(self) -> None:
         # Back re-queues under a new epoch: older audio is stale once something was re-queued.
+        # An ownerless back acts on the floor holder's owner, else on the owner of the chunk
+        # that finished last; with neither (e.g. the hold kept the next group from taking the
+        # floor and nothing has finished yet) it is a no-op and invalidates nothing.
         self._check_new_starts()
+        acts = self.sim.status()["floor"] is not None or self.finished_any
         epochs = [e.chunk.epoch for e in self.sim.effects if isinstance(e, Generate)]
         floor = max(epochs, default=-1) + 1
+        effects_before = len(self.sim.effects)
         assert self._send(Back()).ok
+        if not acts:
+            assert self.sim.effects[effects_before:] == []
+            return
         status = self.sim.status()
         if status["queued"] != 0 or status["playing"]:
             self.epoch_floor = floor
@@ -227,6 +236,7 @@ class SessionMachine(RuleBasedStateMachine):
     def complete_play(self) -> None:
         if self.sim.playing is not None:
             self.sim.complete()
+            self.finished_any = True
 
     @rule()
     def fail_play(self) -> None:

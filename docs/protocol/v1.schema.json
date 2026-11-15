@@ -10,6 +10,18 @@
         "id": {
           "type": "string"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "v": {
           "type": "integer"
         }
@@ -28,6 +40,7 @@
         "audio_failed",
         "bad_frame",
         "bad_version",
+        "busy",
         "engine_failed",
         "internal",
         "invalid_argument",
@@ -41,7 +54,7 @@
       "title": "ErrorCode"
     },
     "Event": {
-      "description": "Envelope for server-pushed events; defined for v1, unused in the MVP.",
+      "description": "Envelope for server-pushed events, sent only after ``subscribe``.\n\n    The first is ``snapshot`` (the status data); clients ignore unknown events and fields.",
       "properties": {
         "data": {
           "type": "object"
@@ -87,6 +100,29 @@
       "title": "IdleRequest",
       "type": "object"
     },
+    "LoadRequest": {
+      "description": "Load the engine now, without reading; the usual idle timeout follows (added within v1 S1).",
+      "properties": {
+        "cmd": {
+          "enum": [
+            "load"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd",
+        "v",
+        "id"
+      ],
+      "title": "LoadRequest",
+      "type": "object"
+    },
     "PauseRequest": {
       "properties": {
         "cmd": {
@@ -96,6 +132,18 @@
         },
         "id": {
           "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "v": {
           "type": "integer"
@@ -185,6 +233,18 @@
         "id": {
           "type": "string"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "v": {
           "type": "integer"
         }
@@ -207,6 +267,10 @@
         "id": {
           "type": "string"
         },
+        "if_idle": {
+          "default": false,
+          "type": "boolean"
+        },
         "v": {
           "type": "integer"
         }
@@ -228,6 +292,18 @@
         },
         "id": {
           "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "v": {
           "type": "integer"
@@ -262,6 +338,19 @@
             "speak"
           ]
         },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "id": {
           "type": "string"
         },
@@ -284,10 +373,39 @@
           "default": false,
           "type": "boolean"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preempt": {
+          "default": false,
+          "type": "boolean"
+        },
         "rate": {
           "anyOf": [
             {
               "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
             },
             {
               "type": "null"
@@ -367,6 +485,18 @@
         "id": {
           "type": "string"
         },
+        "owner": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "v": {
           "type": "integer"
         }
@@ -380,7 +510,7 @@
       "type": "object"
     },
     "SubscribeRequest": {
-      "description": "Reserved for events; the MVP daemon answers ``unsupported``.",
+      "description": "Turns the connection into an event stream: reply ``ok``, a ``snapshot`` event, then events.\n\n    Supported from v1 S1 (advertised in ``status.caps``); earlier daemons answer ``unsupported``.",
       "properties": {
         "cmd": {
           "enum": [
@@ -465,12 +595,16 @@
       },
       {
         "$ref": "#/$defs/SubscribeRequest"
+      },
+      {
+        "$ref": "#/$defs/LoadRequest"
       }
     ],
     "discriminator": {
       "mapping": {
         "back": "#/$defs/BackRequest",
         "idle": "#/$defs/IdleRequest",
+        "load": "#/$defs/LoadRequest",
         "pause": "#/$defs/PauseRequest",
         "resume": "#/$defs/ResumeRequest",
         "shutdown": "#/$defs/ShutdownRequest",

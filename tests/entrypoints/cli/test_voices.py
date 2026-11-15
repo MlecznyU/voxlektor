@@ -1,5 +1,7 @@
 """``vxl voices`` lists the local catalog (there is no protocol command for it)."""
 
+import json
+
 import pytest
 
 from tests.entrypoints.cli.conftest import FakeWire
@@ -13,7 +15,7 @@ def test_lists_bundled_voices_and_marks_the_default(
     lines = capsys.readouterr().out.splitlines()
     assert "* v0-default" in lines
     assert "  m1-calm" in lines
-    assert len(lines) == 7
+    assert len(lines) == 12
     assert wire.requests == []
 
 
@@ -25,3 +27,18 @@ def test_marker_follows_the_configured_voice(
     lines = capsys.readouterr().out.splitlines()
     assert "* f2-narrator" in lines
     assert "  v0-default" in lines
+
+
+def test_voices_json(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VOXLEKTOR_VOICE", "m1-calm")
+    assert main(["voices", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    data = json.loads(out)
+    assert data["default"] == "m1-calm"
+    assert len(data["voices"]) == 12
+    assert data["voices"] == sorted(data["voices"])
+    assert "v0-default" in data["voices"]
+    assert wire.requests == []

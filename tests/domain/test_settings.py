@@ -52,6 +52,7 @@ def test_all_keys_are_applied() -> None:
             "history": 5,
             "idle_timeout": "1h",
             "autostart": False,
+            "floor_grace": "15s",
         }
     )
     assert settings == Settings(
@@ -64,6 +65,7 @@ def test_all_keys_are_applied() -> None:
         history=5,
         idle_timeout_s=3600,
         autostart=False,
+        floor_grace_s=15,
     )
 
 
@@ -83,6 +85,26 @@ def test_volume_rejects(value: object) -> None:
     with pytest.raises(InvalidSetting) as info:
         merge_layers({"volume": value})
     assert info.value.message == "volume must be an integer between 0 and 100"
+
+
+def test_floor_grace_default_and_forms() -> None:
+    assert Settings().floor_grace_s == 8
+    assert merge_layers().floor_grace_s == 8
+    assert merge_layers({"floor_grace": "15s"}).floor_grace_s == 15
+    assert merge_layers({"floor_grace": "0"}).floor_grace_s == 0
+    assert merge_layers({"floor_grace": 0}).floor_grace_s == 0
+    assert merge_layers({"floor_grace": 12}).floor_grace_s == 12
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, True, None, ["8s"]])
+def test_floor_grace_invalid_raises(value: object) -> None:
+    with pytest.raises(InvalidSetting):
+        merge_layers({"floor_grace": value})
+
+
+def test_floor_grace_invalid_duration_raises() -> None:
+    with pytest.raises(InvalidDuration):
+        merge_layers({"floor_grace": "soon"})
 
 
 def test_idle_timeout_accepts_seconds_int() -> None:

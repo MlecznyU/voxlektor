@@ -7,6 +7,7 @@ from voxlektor.adapters.transport.mapping import error_reply, to_command, to_wir
 from voxlektor.app.commands import (
     Back,
     Command,
+    Load,
     Pause,
     Resume,
     SetIdle,
@@ -45,6 +46,15 @@ from voxlektor.testing.simulator import Simulator
             Speak("hi", "a", "pl", 1.5, True),
         ),
         (
+            wire.SpeakRequest(v=1, id="1", text="hi", owner="o", group="g", tag="t", preempt=True),
+            Speak("hi", None, None, None, False, owner="o", group="g", tag="t", preempt=True),
+        ),
+        (wire.PauseRequest(v=1, id="1", owner="o"), Pause(owner="o")),
+        (wire.ResumeRequest(v=1, id="1", owner="o"), Resume(owner="o")),
+        (wire.SkipRequest(v=1, id="1", owner="o"), Skip(owner="o")),
+        (wire.BackRequest(v=1, id="1", owner="o"), Back(owner="o")),
+        (wire.StopReadingRequest(v=1, id="1", owner="o"), StopReading(owner="o")),
+        (
             wire.SpeakRequest(v=1, id="1", text="hi", base_lang="en"),
             Speak("hi", None, None, None, False, base_lang="en"),
         ),
@@ -61,6 +71,8 @@ from voxlektor.testing.simulator import Simulator
         (wire.IdleRequest(v=1, id="1", timeout="10m"), SetIdle("10m")),
         (wire.UnloadRequest(v=1, id="1"), Unload()),
         (wire.ShutdownRequest(v=1, id="1"), Shutdown()),
+        (wire.ShutdownRequest(v=1, id="1", if_idle=True), Shutdown(if_idle=True)),
+        (wire.LoadRequest(v=1, id="1"), Load()),
     ],
 )
 def test_to_command(req: wire.Request, cmd: Command) -> None:
@@ -91,6 +103,7 @@ def test_status_state_is_uppercased() -> None:
         (InvalidSetting("bad"), wire.ErrorCode.invalid_setting),
         (PlatformError(), wire.ErrorCode.unsupported),
         (DomainError("unknown_engine", "no such engine"), wire.ErrorCode.unknown_engine),
+        (DomainError("busy", "the daemon is reading"), wire.ErrorCode.busy),
         (DomainError("something_new", "odd"), wire.ErrorCode.internal),
     ],
 )
@@ -131,7 +144,17 @@ def _supported_wire_commands() -> set[str]:
         assert isinstance(member, msgspec.inspect.StructType)
         assert isinstance(member.tag, str)
         tags.add(member.tag)
-    return tags - {"subscribe"}
+    return tags
+
+
+def test_caps_lists_subscribe() -> None:
+    clock = FakeClock()
+    catalog = VoiceCatalog(InMemoryVoiceRepository([VoiceRef("a", Path("/v/a.wav"), "a")]))
+    session = Session(Settings(engine=EngineId("fake")), catalog, clock)
+    sim = Simulator(session, FakeEngine(sample_rate=100), MemoryOutput(auto_complete=True), clock)
+    rep = to_wire_reply("1", sim.handle(Status()))
+    assert rep.data is not None
+    assert "subscribe" in rep.data["caps"]
 
 
 def test_status_caps_equal_supported_wire_commands() -> None:
@@ -164,10 +187,18 @@ def _real_error_replies() -> dict[str, wire.Reply]:
     unknown_engine = DomainError(
         "unknown_engine", "unknown engine 'nope'; available: fake, omnivoice"
     )
-    with pytest.raises(ProtocolError) as subscribe:
-        to_command(wire.SubscribeRequest(v=1, id="r12"))
+    with pytest.raises(ProtocolError) as subscribe:  # a server without a subscribe factory
+        to_command(wire.SubscribeRequest(v=1, id="x11"))
     unsupported = error_reply(subscribe.value)
+    reading = Simulator(
+        Session(Settings(engine=EngineId("fake")), catalog, clock),
+        FakeEngine(sample_rate=100),
+        MemoryOutput(auto_complete=False),
+        clock,
+    )
+    reading.handle(Speak("Hello world.", "a", None, None, False))
     return {
+        "busy": to_wire_reply("x10", reading.handle(Shutdown(if_idle=True))),
         "bad_frame": _protocol_failure(b"{bad"),
         "bad_version": _protocol_failure(b'{"v":2}'),
         "unknown_command": _protocol_failure(b'{"v":1,"id":"x1","cmd":"rm"}'),
@@ -194,7 +225,7 @@ def _speak_sim() -> Simulator:
 def test_speak_reply_carries_the_planned_chunk_count() -> None:
     sim = _speak_sim()
     reply = to_wire_reply("r1", sim.handle(Speak("Hello world.", "a", None, None, False)))
-    assert reply.data == {"chunks": 1}
+    assert reply.data == {"chunks": 1, "group": "g1"}
     fixtures = Path(__file__).parents[2] / "contracts" / "protocol_v1" / "replies.jsonl"
     assert encode_line(reply) in fixtures.read_bytes().splitlines(keepends=True)
     assert to_wire_reply("r2", sim.handle(Speak("   ", "a", None, None, False))).data == {

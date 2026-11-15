@@ -13,3 +13,5 @@
 {"cmd":"unload","v":1,"id":"r10"}
 {"cmd":"shutdown","v":1,"id":"r11"}
 {"cmd":"subscribe","v":1,"id":"r12"}
+{"cmd":"load","v":1,"id":"r16"}
+{"cmd":"shutdown","v":1,"id":"r17","if_idle":true}

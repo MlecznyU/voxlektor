@@ -1,5 +1,8 @@
 """Control commands: playback, idle timeout, unload, stop, status, and ``serve``.
 
+``status --json`` prints one JSON line for tools: ``{"running": false}`` when no daemon runs,
+otherwise ``{"running": true, ...}`` with the protocol ``status`` fields.
+
 When nobody listens on the socket (``NotRunning``), ``status`` prints ``OFF`` and ``stop`` prints
 ``not running`` (exit 0). A daemon that is there but does not answer properly (any other
 ``ServiceUnavailable``: timeout, broken reply) is never reported as off: every command, these
@@ -8,6 +11,7 @@ has removed its socket, so a following command sees it gone. ``serve`` runs the 
 foreground; ``entrypoints.daemon`` is imported only there (it loads asyncio and the runtime).
 """
 
+import json
 import time
 from pathlib import Path
 from typing import Annotated
@@ -26,34 +30,40 @@ _sleep = time.sleep
 _monotonic = time.monotonic
 
 
-def _plain(cmd: str) -> int:
-    build_client({}).send(cmd)
+type _Owner = Annotated[
+    str | None, typer.Option("--owner", help="Act on this owner's reading only.")
+]
+
+
+def _plain(cmd: str, owner: str | None = None) -> int:
+    args: dict[str, object] = {} if owner is None else {"owner": owner}
+    build_client({}).send(cmd, **args)
     return EXIT_OK
 
 
-def pause() -> int:
+def pause(owner: _Owner = None) -> int:
     """Pause the reading."""
-    return _plain("pause")
+    return _plain("pause", owner)
 
 
-def resume() -> int:
+def resume(owner: _Owner = None) -> int:
     """Resume a paused reading."""
-    return _plain("resume")
+    return _plain("resume", owner)
 
 
-def skip() -> int:
+def skip(owner: _Owner = None) -> int:
     """Skip to the next chunk."""
-    return _plain("skip")
+    return _plain("skip", owner)
 
 
-def back() -> int:
+def back(owner: _Owner = None) -> int:
     """Go back to the previous chunk."""
-    return _plain("back")
+    return _plain("back", owner)
 
 
-def stop_reading() -> int:
+def stop_reading(owner: _Owner = None) -> int:
     """Stop the reading; the engine stays warm."""
-    return _plain("stop_reading")
+    return _plain("stop_reading", owner)
 
 
 def unload() -> int:
@@ -73,13 +83,20 @@ def idle(
     return EXIT_OK
 
 
-def status() -> int:
+def status(
+    as_json: Annotated[
+        bool, typer.Option("--json", help="One JSON line for tools: running + the status.")
+    ] = False,
+) -> int:
     """Show the daemon's state, or OFF."""
     ctx = build_client({})
     try:
         data = ctx.send("status")
     except NotRunning:
-        print(OFF)
+        print(json.dumps({"running": False}) if as_json else OFF)
+        return EXIT_OK
+    if as_json:
+        print(json.dumps({"running": True, **data}))
         return EXIT_OK
     for line in status_lines(data):
         print(line)

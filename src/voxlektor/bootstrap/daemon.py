@@ -12,6 +12,12 @@ the loop thread at the very end, when nothing else is served). Only our own file
 the socket inode recorded after bind, and the pid file inode we wrote, still holding our pid.
 A successor that has already replaced them keeps its files.
 
+Events: one ``EventHub`` feeds ``CoreLoop`` (publisher) and the socket server (one bounded queue
+of ``_SUBSCRIBER_LIMIT`` events per ``subscribe`` connection). The ``snapshot`` is the Session's
+status read directly, the one Session call outside ``CoreLoop``: ``Status`` has no effects and
+the server reads it on the loop thread in the same step as it subscribes, so it is consistent
+with the events that follow (``CoreLoop.handle`` is a coroutine and the snapshot is not).
+
 Outputs: an injected ``output``/``cues`` wins; otherwise ``VOXLEKTOR_OUTPUT=memory`` selects the
 device-less ``MemoryOutput`` and ``MemoryCuePlayer`` (test runs), else sounddevice. The
 sounddevice adapters are imported only when selected, so memory mode never loads PortAudio.
@@ -22,18 +28,20 @@ import os
 import platform as host
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
 
 import msgspec
 
+import voxlektor
 from voxlektor.adapters.audio.dsp import level as dsp_level
 from voxlektor.adapters.audio.dsp import time_stretch
 from voxlektor.adapters.audio.memory_out import MemoryCuePlayer, MemoryOutput
 from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
 from voxlektor.adapters.transport.mapping import error_reply, to_command, to_wire_reply
-from voxlektor.adapters.transport.unix_server import serve_unix
+from voxlektor.adapters.transport.unix_server import Subscription, serve_unix
+from voxlektor.app.commands import Status
 from voxlektor.app.ports import AudioOutput, CuePlayer, PlatformInfo
 from voxlektor.app.session import Session
 from voxlektor.app.voices import VoiceCatalog
@@ -44,6 +52,7 @@ from voxlektor.contracts.protocol import ErrorCode, Reply, ReplyError
 from voxlektor.domain.settings import Settings
 from voxlektor.runtime.buffers import AudioBuffers
 from voxlektor.runtime.engine_worker import EngineWorker
+from voxlektor.runtime.events import BoundedSubscription, EventHub
 from voxlektor.runtime.loop import CoreLoop
 
 _log = logging.getLogger(__name__)
@@ -52,6 +61,7 @@ _OUTPUT_ENV = "VOXLEKTOR_OUTPUT"
 _VOICES_DIR = "voices"
 _MAX_ECHO_ID = 128  # chars of a request id echoed in an error reply
 _MAX_ERROR_MESSAGE = 1024  # chars of an error message (it may quote a command name or a value)
+_SUBSCRIBER_LIMIT = 1000  # events waiting per subscriber before its connection is closed
 
 type _FileId = tuple[int, int]  # (st_dev, st_ino)
 
@@ -70,19 +80,21 @@ class _MonotonicClock:
 
 
 class _Daemon:
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917  # private wiring of every collaborator
         self,
         loop: CoreLoop,
         worker: EngineWorker,
         close_cues: Callable[[], None] | None,
         socket_path: Path | None,
         pid_path: Path | None,
+        subscribe: Callable[[], Subscription],
     ) -> None:
         self.loop = loop
         self._worker = worker
         self._close_cues = close_cues
         self._socket_path = socket_path
         self._pid_path = pid_path
+        self._subscribe = subscribe
         self._socket_id: _FileId | None = None
         self._pid_id: _FileId | None = None
 
@@ -91,7 +103,10 @@ class _Daemon:
         try:
             if self._socket_path is not None:
                 server = await serve_unix(
-                    self._socket_path, self._handle_line, on_ready=self._on_ready
+                    self._socket_path,
+                    self._handle_line,
+                    on_ready=self._on_ready,
+                    subscribe=self._subscribe,
                 )
             await self.loop.run_until_stopped()
         finally:
@@ -219,15 +234,29 @@ def build_daemon(
         else:
             cues, close_cues = _device_cues()
     clock = _MonotonicClock()
-    session = Session(settings, catalog, clock)
+    session = Session(settings, catalog, clock, version=voxlektor.__version__)
+    hub = EventHub()
+
+    def status() -> Mapping[str, object]:
+        # Read-only: Status has no effects, and this runs on the loop thread between events.
+        reply = session.handle(Status()).reply
+        return {} if reply is None else reply.data
+
     # Starts the engine thread; every chunk: time_stretch, then level (normalise, volume, limit).
     worker = EngineWorker(load_engine, repo, time_stretch, level=dsp_level)
     try:
-        core = CoreLoop(session, worker, output, AudioBuffers(), clock, cues)
+        core = CoreLoop(session, worker, output, AudioBuffers(), clock, cues, events=hub)
     except BaseException:
         worker.close()
         raise
-    return _Daemon(core, worker, close_cues, socket_path, pid_path)
+    return _Daemon(
+        core,
+        worker,
+        close_cues,
+        socket_path,
+        pid_path,
+        lambda: BoundedSubscription(hub, _SUBSCRIBER_LIMIT, status),
+    )
 
 
 # The device adapters load PortAudio when imported, so they are imported only when selected.

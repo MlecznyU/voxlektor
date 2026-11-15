@@ -25,7 +25,7 @@ domain | contracts   pure logic with no I/O and no numpy | public, versioned con
 src/voxlektor/
   __init__.py                 only __version__ (no imports, so that `vxl` starts fast)
   __main__.py                 -> entrypoints.cli.app:main
-  bundled_voices/<7>/{ref.wav,ref.txt,voice.toml}
+  bundled_voices/<12>/{ref.wav,ref.txt,voice.toml}
   bundled_cues/stopped_en.wav the STOPPED cue; made once by scripts/make_cues.py (real OmniVoice)
 
   contracts/                  PUBLIC, VERSIONED
@@ -41,6 +41,7 @@ src/voxlektor/
     keepwarm.py               COLD/LOADING/WARM/UNLOADING; transition(state, event) -> (state, actions); time arrives in events
     playback.py               PlaybackQueue[A]: queued/current/history(20); skip/back/stop/pause
     reading.py                Chunk; AheadWindow (max. 2 ahead); UnderrunTracker; plan_reading() (per-chunk language, same-language merge)
+    floor.py                  Floor: floor scheduler (oldest eligible group, owner pause, grace, hold, preempt); time arrives as arguments
     text/chunking.py          split_text()
     text/lang.py              detect_lang()
     text/limits.py            MAX_CHARS / MERGE_BELOW shared by split_text and plan_reading (not frozen)
@@ -48,8 +49,10 @@ src/voxlektor/
   app/                        SYNC, no threads and no asyncio; ports only
     ports.py                  Clock, AudioOutput, CuePlayer, VoiceRepository, SettingsStore (+ setup marker), PlatformInfo, EngineProvider; setup: Prompter (+ Option), SamplePlayer, ModelStore
     commands.py               application commands (independent of the protocol version)
-    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit, PlayCue(Cue); Reply, Outcome
-    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_prompt_failed/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded
+    effects.py                Effect: LoadEngine, UnloadEngine, PrepareVoice, Generate, CancelGeneration, StartPlayback, Pause/Resume/AbortPlayback, DropAudio, Schedule/CancelWake, Exit, PlayCue(Cue), Emit; Reply, Outcome
+    session.py                Session.handle(cmd) -> Outcome(reply, effects); on_loaded/on_load_failed/on_prompt_ready/on_prompt_failed/on_generated/on_gen_failed/on_play_done/on_play_failed/on_wake/on_unloaded; multi-owner groups on the Floor
+    _groups.py                private Session state: Group (epoch, age, chunks), Item, Gen, Metrics, history_add
+    _events.py                private Session events (Emit): Tags (tag runs, exactly-once tag_finished), Watch (floor/waiting/paused/resumed/drained diffs)
     voice_prompts.py          get_or_build_prompt(): cache via VoiceRepository + Engine.serialize_prompt; fresh= rebuilds
     voices.py                 VoiceCatalog: list/resolve/ensure_bundled
     setup.py                  run_interactive() (engine, model + license, voice, base language, rate, volume, service; writes at the end) and apply_flags() (silent); SetupResult, SetupCancelled
@@ -58,7 +61,7 @@ src/voxlektor/
     loop.py                   CoreLoop: asyncio, calls Session, executes Effects, call_soon_threadsafe, wake timers (call_at)
     engine_worker.py          EngineWorker: ONE thread, FIFO, epochs, cooperative cancellation (stale queued Generates skipped)
     buffers.py                AudioBuffers: ChunkId -> AudioChunk (numpy outside Session), bounded (raises past max_items)
-    events.py                 EventHub (groundwork for subscribe; unused by the CLI in the MVP)
+    events.py                 EventHub: fan-out of Emit; subscribe_bounded() queues (None = overflow); BoundedSubscription
 
   adapters/                   technology; families independent of each other
     engines/omnivoice_mlx.py  OmniVoice via mlx-audio; pinned revision; returns numpy copies; NO file I/O
@@ -74,8 +77,9 @@ src/voxlektor/
     platform/macos.py         paths (0700), hardware
     platform/unsupported.py   "platform not supported yet"
     transport/mapping.py      wire v1 <-> application commands (the ONLY place that knows both)
-    transport/unix_server.py  asyncio server: frames (one line each, several per connection), MAX_FRAME, 0600
+    transport/unix_server.py  asyncio server: frames (one line each, several per connection), MAX_FRAME, 0600; subscribe -> event stream (closed on overflow)
     transport/unix_client.py  blocking client (no asyncio): request(), probe() (also used by `serve`)
+    transport/unix_stream.py  blocking event-stream reader (no asyncio): open_stream() = subscribe, then data+event per frame until EOF; write side kept open
     procs/spawn.py            daemon spawn (argv, start_new_session), stale regular file at the socket path
     terminal/menus.py         QuestionaryPrompter: arrow-key menus for `vxl setup` (Esc / no answer -> SetupCancelled; Ctrl+C propagates)
 
@@ -88,6 +92,8 @@ src/voxlektor/
 
   entrypoints/
     cli/{app,speak,control,voices,config,output,setup}.py
+    cli/warm.py               `vxl warm`: start the daemon if needed (outdated idle daemon replaced) and request `load`; returns at once
+    cli/watch.py              `vxl watch`: event stream to stdout (JSON lines or one human line each), --owner filter, daemon_off retry, disconnected = exit 2
     daemon.py                 `serve`: platform check, single instance (flock voxlektor.lock), stale socket, rotating log, signals
     oneshot.py                in-process reading (CoreLoop without transport)
 
@@ -109,7 +115,7 @@ Phase 3 adds (without changing the structure): `domain/text/markdown.py`, `app/{
 | CLI process | `entrypoints.cli` + `unix_client` | blocking socket I/O | does not import asyncio, numpy or MLX on the control path |
 | One-shot | `entrypoints.oneshot` | the same CoreLoop without transport | has no reading logic of its own |
 
-**Cancellation via epochs:** `--now`, `stop_reading` and `unload` bump the epoch; Session discards results with a stale epoch. CoreLoop derives a lower bound of the epoch from the effects and commands it sees and passes it to `EngineWorker.cancel_before`, so queued `Generate` jobs of an abandoned reading are skipped without a result. A single OmniVoice `generate` cannot be interrupted, so in the worst case one chunk is wasted.
+**Cancellation via epochs:** every group carries an epoch (all groups of one owner share it); `--now`, `stop_reading`, `back`, failures and `unload` give the affected owners a fresh epoch, and Session discards results with a stale epoch. Session names the epochs it abandons in `CancelGeneration`; CoreLoop passes them to `EngineWorker.cancel_epochs`, so queued `Generate` jobs of an abandoned reading are skipped without a result, while other owners' queued jobs still run. A single OmniVoice `generate` cannot be interrupted, so in the worst case one chunk is wasted.
 
 **MLX / audio rules:** MLX arrays never leave the engine thread. `unload` on the same thread as `load`. The daemon starts via `subprocess` (argv), never via `os.fork` after importing MLX/PortAudio. Audio output with `latency="high"`; playback starts once the first chunk is buffered.
 

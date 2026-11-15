@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import voxlektor
 from voxlektor.adapters.platform.unsupported import UnsupportedPlatform
 from voxlektor.app.ports import PlatformInfo
 from voxlektor.bootstrap import client
@@ -346,3 +347,169 @@ def test_catalog_lists_the_bundled_voices(home: Path) -> None:
     names = build_client({}).catalog().list()
     assert "v0-default" in names
     assert (home / "config" / "voices" / "v0-default").is_dir()
+
+
+# ---------------------------------------------------------------- outdated daemon
+
+
+_IDLE: dict[str, object] = {"playing": False, "queued": 0, "groups": []}
+
+
+class _Versioned:
+    """A daemon reporting ``statuses`` in turn (the last one repeats); ``ensure_daemon`` pings.
+
+    ``shutdown`` answers ok, or the error / exception in ``shutdown``.
+    """
+
+    def __init__(
+        self, statuses: list[dict[str, object]], shutdown: dict[str, object] | Exception
+    ) -> None:
+        self.statuses = statuses
+        self.shutdown = shutdown
+        self.requests: list[dict[str, object]] = []
+        self.ensured = 0
+
+    def request(
+        self, path: Path, req: dict[str, object], timeout: float = 5.0
+    ) -> dict[str, object]:
+        self.requests.append(req)
+        if req["cmd"] == "status":
+            data = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+            return {"v": 1, "id": "x", "ok": True, "data": data}
+        if isinstance(self.shutdown, Exception):
+            raise self.shutdown
+        return {"v": 1, "id": "x", **self.shutdown}
+
+    def ensure(self, platform: PlatformInfo, ping: Callable[[], bool]) -> None:
+        self.ensured += 1
+        assert ping()
+
+    @property
+    def cmds(self) -> list[object]:
+        return [req["cmd"] for req in self.requests]
+
+
+def _versioned(
+    monkeypatch: pytest.MonkeyPatch,
+    statuses: list[dict[str, object]],
+    shutdown: dict[str, object] | Exception | None = None,
+) -> _Versioned:
+    daemon = _Versioned(statuses, {"ok": True, "data": {}} if shutdown is None else shutdown)
+    monkeypatch.setattr(client, "request", daemon.request)
+    monkeypatch.setattr(client, "ensure_daemon", daemon.ensure)
+    return daemon
+
+
+_BUSY: dict[str, object] = {
+    "ok": False,
+    "error": {"code": "busy", "message": "the daemon is reading"},
+}
+
+
+def test_outdated_idle_daemon_restarted(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    old: dict[str, object] = {"version": "0.0.1", **_IDLE}
+    new: dict[str, object] = {"version": voxlektor.__version__, **_IDLE}
+    daemon = _versioned(monkeypatch, [old, new])
+    ctx = build_client({})
+    ctx.ensure(work=True)
+    assert daemon.cmds == ["status", "shutdown", "status"]
+    assert daemon.requests[1] == {"cmd": "shutdown", "if_idle": True}
+    assert daemon.ensured == 2  # a fresh daemon was started
+    assert ctx.daemon_outdated is False
+
+
+def test_outdated_busy_daemon_is_kept_and_reported(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    daemon = _versioned(monkeypatch, [{"version": "0.0.1", **_IDLE}], _BUSY)
+    ctx = build_client({})
+    ctx.ensure(work=True)
+    assert daemon.cmds == ["status", "shutdown"]
+    assert daemon.ensured == 1
+    assert ctx.daemon_outdated is True
+
+
+def test_outdated_daemon_that_reports_a_reading_is_not_asked_to_stop(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A daemon from before ``if_idle`` ignores the field: never send it a plain shutdown.
+    reading: dict[str, object] = {"version": "0.0.1", "playing": False, "queued": 2, "groups": []}
+    daemon = _versioned(monkeypatch, [reading])
+    ctx = build_client({})
+    ctx.ensure(work=True)
+    assert daemon.cmds == ["status"]
+    assert ctx.daemon_outdated is True
+
+
+def test_daemon_without_a_version_is_outdated(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    daemon = _versioned(monkeypatch, [{"playing": True}])
+    ctx = build_client({})
+    ctx.ensure(work=True)
+    assert daemon.cmds == ["status"]
+    assert ctx.daemon_outdated is True
+
+
+def test_outdated_daemon_gone_before_the_shutdown_is_started_fresh(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    daemon = _versioned(monkeypatch, [{"version": "0.0.1", **_IDLE}], NotRunning())
+    ctx = build_client({})
+    ctx.ensure(work=True)
+    assert daemon.cmds == ["status", "shutdown", "status"]
+    assert daemon.ensured == 2
+    assert ctx.daemon_outdated is False
+
+
+def test_outdated_daemon_waits_until_its_socket_is_gone(
+    home: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    daemon = _versioned(monkeypatch, [{"version": "0.0.1", **_IDLE}])
+    ctx = build_client({})
+    sock = ctx.platform.socket_path()
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    sock.write_text("")
+    ticks: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        ticks.append(seconds)
+        clock[0] += seconds
+        if len(ticks) == 3:
+            sock.unlink()
+
+    monkeypatch.setattr(client, "_sleep", sleep)
+    ctx.ensure(work=True)
+    assert len(ticks) == 3
+    assert daemon.ensured == 2
+    assert ctx.daemon_outdated is False
+
+
+def test_outdated_daemon_that_does_not_go_away_is_reported(
+    home: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    daemon = _versioned(monkeypatch, [{"version": "0.0.1", **_IDLE}])
+    ctx = build_client({})
+    sock = ctx.platform.socket_path()
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    sock.write_text("")
+    ctx.ensure(work=True)
+    assert clock[0] >= 5.0
+    assert daemon.ensured == 2
+    assert ctx.daemon_outdated is True
+
+
+def test_current_daemon_is_left_alone(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    daemon = _versioned(monkeypatch, [{"version": voxlektor.__version__, **_IDLE}])
+    ctx = build_client({})
+    ctx.ensure(work=True)
+    assert daemon.cmds == ["status"]
+    assert ctx.daemon_outdated is False
+
+
+def test_ensure_without_work_never_checks_the_version(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    daemon = _versioned(monkeypatch, [{"version": "0.0.1", **_IDLE}])
+    ctx = build_client({})
+    ctx.ensure()
+    assert daemon.cmds == ["status"]
+    assert ctx.daemon_outdated is False
