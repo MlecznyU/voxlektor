@@ -7,6 +7,7 @@ from voxlektor.adapters.transport.mapping import error_reply, to_command, to_wir
 from voxlektor.app.commands import (
     Back,
     Command,
+    Load,
     Pause,
     Resume,
     SetIdle,
@@ -70,6 +71,8 @@ from voxlektor.testing.simulator import Simulator
         (wire.IdleRequest(v=1, id="1", timeout="10m"), SetIdle("10m")),
         (wire.UnloadRequest(v=1, id="1"), Unload()),
         (wire.ShutdownRequest(v=1, id="1"), Shutdown()),
+        (wire.ShutdownRequest(v=1, id="1", if_idle=True), Shutdown(if_idle=True)),
+        (wire.LoadRequest(v=1, id="1"), Load()),
     ],
 )
 def test_to_command(req: wire.Request, cmd: Command) -> None:
@@ -100,6 +103,7 @@ def test_status_state_is_uppercased() -> None:
         (InvalidSetting("bad"), wire.ErrorCode.invalid_setting),
         (PlatformError(), wire.ErrorCode.unsupported),
         (DomainError("unknown_engine", "no such engine"), wire.ErrorCode.unknown_engine),
+        (DomainError("busy", "the daemon is reading"), wire.ErrorCode.busy),
         (DomainError("something_new", "odd"), wire.ErrorCode.internal),
     ],
 )
@@ -140,7 +144,17 @@ def _supported_wire_commands() -> set[str]:
         assert isinstance(member, msgspec.inspect.StructType)
         assert isinstance(member.tag, str)
         tags.add(member.tag)
-    return tags - {"subscribe"}
+    return tags
+
+
+def test_caps_lists_subscribe() -> None:
+    clock = FakeClock()
+    catalog = VoiceCatalog(InMemoryVoiceRepository([VoiceRef("a", Path("/v/a.wav"), "a")]))
+    session = Session(Settings(engine=EngineId("fake")), catalog, clock)
+    sim = Simulator(session, FakeEngine(sample_rate=100), MemoryOutput(auto_complete=True), clock)
+    rep = to_wire_reply("1", sim.handle(Status()))
+    assert rep.data is not None
+    assert "subscribe" in rep.data["caps"]
 
 
 def test_status_caps_equal_supported_wire_commands() -> None:
@@ -173,10 +187,18 @@ def _real_error_replies() -> dict[str, wire.Reply]:
     unknown_engine = DomainError(
         "unknown_engine", "unknown engine 'nope'; available: fake, omnivoice"
     )
-    with pytest.raises(ProtocolError) as subscribe:
-        to_command(wire.SubscribeRequest(v=1, id="r12"))
+    with pytest.raises(ProtocolError) as subscribe:  # a server without a subscribe factory
+        to_command(wire.SubscribeRequest(v=1, id="x11"))
     unsupported = error_reply(subscribe.value)
+    reading = Simulator(
+        Session(Settings(engine=EngineId("fake")), catalog, clock),
+        FakeEngine(sample_rate=100),
+        MemoryOutput(auto_complete=False),
+        clock,
+    )
+    reading.handle(Speak("Hello world.", "a", None, None, False))
     return {
+        "busy": to_wire_reply("x10", reading.handle(Shutdown(if_idle=True))),
         "bad_frame": _protocol_failure(b"{bad"),
         "bad_version": _protocol_failure(b'{"v":2}'),
         "unknown_command": _protocol_failure(b'{"v":1,"id":"x1","cmd":"rm"}'),

@@ -24,7 +24,9 @@ names the epochs it abandons in ``CancelGeneration``, and the loop hands them to
 ``EngineWorker.cancel_epochs``, so queued generations of an abandoned reading are skipped.
 
 Events: ``Emit`` is published to the ``EventHub`` given as ``events`` (on the loop thread, in
-effect order); without a hub it is dropped.
+effect order); without a hub it is dropped. The socket server streams the hub to ``subscribe``
+connections; their ``snapshot`` is the one Session read outside this class (bootstrap reads
+``Status``, which has no effects, on the loop thread: see ``bootstrap.daemon``).
 
 Stopping: ``Exit`` (after ``Shutdown``) resolves ``run_until_stopped``, which cancels the wake
 timers and aborts the output. The worker belongs to whoever built it: the owner closes it after

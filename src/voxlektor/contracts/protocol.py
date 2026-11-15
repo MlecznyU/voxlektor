@@ -29,6 +29,7 @@ class ErrorCode(StrEnum):
     audio_failed = "audio_failed"
     unsupported = "unsupported"
     internal = "internal"
+    busy = "busy"  # Added within v1 (S1): ``shutdown`` with ``if_idle`` while reading
 
 
 WireLang = Literal["auto", "pl", "en"]
@@ -98,11 +99,20 @@ class UnloadRequest(_Request, tag="unload"):
 
 
 class ShutdownRequest(_Request, tag="shutdown"):
-    pass
+    # Added within v1 (S1): refuse with ``busy`` when anything is queued or playing for any
+    # owner, atomically in the daemon; daemons before S1 ignore it and always shut down.
+    if_idle: bool = False
+
+
+class LoadRequest(_Request, tag="load"):
+    """Load the engine now, without reading; the usual idle timeout follows (added within v1 S1)."""
 
 
 class SubscribeRequest(_Request, tag="subscribe"):
-    """Reserved for events; the MVP daemon answers ``unsupported``."""
+    """Turns the connection into an event stream: reply ``ok``, a ``snapshot`` event, then events.
+
+    Supported from v1 S1 (advertised in ``status.caps``); earlier daemons answer ``unsupported``.
+    """
 
 
 type Request = (
@@ -117,6 +127,7 @@ type Request = (
     | UnloadRequest
     | ShutdownRequest
     | SubscribeRequest
+    | LoadRequest
 )
 
 
@@ -136,7 +147,10 @@ class Reply(msgspec.Struct, frozen=True, omit_defaults=True):
 
 
 class Event(msgspec.Struct, frozen=True):
-    """Envelope for server-pushed events; defined for v1, unused in the MVP."""
+    """Envelope for server-pushed events, sent only after ``subscribe``.
+
+    The first is ``snapshot`` (the status data); clients ignore unknown events and fields.
+    """
 
     v: int
     event: str

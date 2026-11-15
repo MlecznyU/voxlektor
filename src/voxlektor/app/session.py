@@ -66,6 +66,7 @@ from voxlektor.app._groups import Gen, Group, Item, Metrics, history_add
 from voxlektor.app.commands import (
     Back,
     Command,
+    Load,
     Pause,
     Resume,
     SetIdle,
@@ -110,6 +111,7 @@ from voxlektor.domain.types import ChunkId, Epoch
 _CAPS = (
     "back",
     "idle",
+    "load",
     "pause",
     "resume",
     "shutdown",
@@ -117,6 +119,7 @@ _CAPS = (
     "speak",
     "status",
     "stop_reading",
+    "subscribe",  # served by the transport (an event stream), advertised here with the rest
     "unload",
 )
 _RATE_MIN = 0.5  # the same bounds as the ``rate`` setting
@@ -131,6 +134,9 @@ type _Owners = frozenset[str] | None  # None: every owner
 
 def _ok(**data: object) -> Reply:
     return Reply(ok=True, data=data, error=None)  # a fresh dict for every reply
+
+
+_BUSY = DomainError("busy", "the daemon is reading")
 
 
 def _reserved() -> Reply:
@@ -151,7 +157,12 @@ def _hits(owners: _Owners, owner: str) -> bool:
 
 
 class Session:
-    def __init__(self, settings: Settings, catalog: VoiceCatalog, clock: Clock) -> None:
+    """``version`` (the package version, from bootstrap) is reported as status ``version``."""
+
+    def __init__(
+        self, settings: Settings, catalog: VoiceCatalog, clock: Clock, *, version: str = "0"
+    ) -> None:
+        self._version = version
         self._settings = settings
         self._catalog = catalog
         self._clock = clock
@@ -183,13 +194,19 @@ class Session:
 
     # ------------------------------------------------------------ commands
 
-    def handle(self, cmd: Command) -> Outcome:  # one arm per command
+    def handle(self, cmd: Command) -> Outcome:  # noqa: PLR0912  # one arm per command
         out: list[Effect] = []
-        if not isinstance(cmd, Status | SetIdle | Unload | Shutdown) and cmd.owner == _CLI:
+        if not isinstance(cmd, Status | SetIdle | Unload | Shutdown | Load) and cmd.owner == _CLI:
             return Outcome(_reserved(), [])
         match cmd:
             case Status():
                 return Outcome(Reply(ok=True, data=self._status(), error=None), [])
+            case Shutdown(if_idle=True) if self._groups:
+                # Atomic in the single writer: another session's reading is never dropped.
+                return Outcome(Reply(ok=False, data={}, error=_BUSY), [])
+            case Load():
+                self._load(out)
+                reply = _ok()
             case Speak():
                 reply = self._speak(cmd, out)
             case Pause(owner):
@@ -285,6 +302,12 @@ class Session:
                 self._interrupt(interrupted, out)
             self._watch.floor(self._floor.holder, out)
         return key
+
+    def _load(self, out: list[Effect]) -> None:
+        """Warm the engine without a reading; a warm, idle engine restarts its idle timeout."""
+        self._feed(kw.NeedEngine(), out)
+        if self._kw.life is kw.Life.WARM and not self._groups:
+            self._feed(kw.Idle(self._clock.now()), out)
 
     def _auto_group(self, owner: str) -> str:
         while (owner, f"g{self._next_group}") in self._groups:
@@ -412,6 +435,7 @@ class Session:
             "waiting": len(self._groups) - (holder is not None),
             "groups": self._group_rows(),
             "tag": None if head is None else self._items[head].tag,
+            "version": self._version,
         }
 
     def _group_rows(self) -> list[dict[str, object]]:

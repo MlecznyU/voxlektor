@@ -27,7 +27,7 @@ from typer._click.exceptions import ClickException
 
 from voxlektor.contracts.codec import ProtocolError
 from voxlektor.domain.errors import DomainError
-from voxlektor.entrypoints.cli import config, control, output, setup, speak, voices
+from voxlektor.entrypoints.cli import config, control, output, setup, speak, voices, warm, watch
 
 app = typer.Typer(
     name="vxl",
@@ -48,6 +48,8 @@ app.command("unload")(control.unload)
 app.command("stop")(control.stop)
 app.command("voices")(voices.voices)
 app.command("setup")(setup.setup)
+app.command("warm")(warm.warm)
+app.command("watch")(watch.watch)
 app.add_typer(config.config_app, name="config")
 
 _COMMANDS = frozenset(
@@ -65,13 +67,29 @@ _COMMANDS = frozenset(
         "stop",
         "voices",
         "setup",
+        "warm",
+        "watch",
         "config",
     }
 )
 _HELP = "--help"
 _END_OF_OPTIONS = "--"
 # The options of ``say`` (must match speak.say; the CLI tests use each of them).
-_SAY_LONG = frozenset({"--voice", "--lang", "--rate", "--volume", "--now", _HELP})
+_SAY_LONG = frozenset(
+    {
+        "--voice",
+        "--lang",
+        "--rate",
+        "--volume",
+        "--now",
+        "--owner",
+        "--group",
+        "--tag",
+        "--preempt",
+        "--json",
+        _HELP,
+    }
+)
 _SAY_SHORT = frozenset({"-v", "-l", "-r", "-f"})
 
 

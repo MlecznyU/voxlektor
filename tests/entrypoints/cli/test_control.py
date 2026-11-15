@@ -216,3 +216,18 @@ def test_serve_with_an_invalid_idle_exits_1(
 ) -> None:
     assert main(["serve", "--idle", "5x"]) == 1
     assert "invalid duration" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("command", "wire_cmd"),
+    [
+        ("pause", "pause"),
+        ("resume", "resume"),
+        ("skip", "skip"),
+        ("back", "back"),
+        ("stop-reading", "stop_reading"),
+    ],
+)
+def test_owner_flag_is_sent_only_when_given(wire: FakeWire, command: str, wire_cmd: str) -> None:
+    assert main([command, "--owner", "pi"]) == 0
+    assert wire.requests == [{"cmd": wire_cmd, "owner": "pi"}]

@@ -30,34 +30,40 @@ _sleep = time.sleep
 _monotonic = time.monotonic
 
 
-def _plain(cmd: str) -> int:
-    build_client({}).send(cmd)
+type _Owner = Annotated[
+    str | None, typer.Option("--owner", help="Act on this owner's reading only.")
+]
+
+
+def _plain(cmd: str, owner: str | None = None) -> int:
+    args: dict[str, object] = {} if owner is None else {"owner": owner}
+    build_client({}).send(cmd, **args)
     return EXIT_OK
 
 
-def pause() -> int:
+def pause(owner: _Owner = None) -> int:
     """Pause the reading."""
-    return _plain("pause")
+    return _plain("pause", owner)
 
 
-def resume() -> int:
+def resume(owner: _Owner = None) -> int:
     """Resume a paused reading."""
-    return _plain("resume")
+    return _plain("resume", owner)
 
 
-def skip() -> int:
+def skip(owner: _Owner = None) -> int:
     """Skip to the next chunk."""
-    return _plain("skip")
+    return _plain("skip", owner)
 
 
-def back() -> int:
+def back(owner: _Owner = None) -> int:
     """Go back to the previous chunk."""
-    return _plain("back")
+    return _plain("back", owner)
 
 
-def stop_reading() -> int:
+def stop_reading(owner: _Owner = None) -> int:
     """Stop the reading; the engine stays warm."""
-    return _plain("stop_reading")
+    return _plain("stop_reading", owner)
 
 
 def unload() -> int:

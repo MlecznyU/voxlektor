@@ -74,9 +74,16 @@ class Unload:
 
 @dataclass(frozen=True, slots=True)
 class Shutdown:
-    pass
+    """Stop the daemon; with ``if_idle`` refused (``busy``) while any owner has a reading."""
+
+    if_idle: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Load:
+    """Warm the engine without reading (daemon-wide, owner-less); then the usual idle timeout."""
 
 
 type Command = (
-    Speak | Pause | Resume | Skip | Back | StopReading | Status | SetIdle | Unload | Shutdown
+    Speak | Pause | Resume | Skip | Back | StopReading | Status | SetIdle | Unload | Shutdown | Load
 )

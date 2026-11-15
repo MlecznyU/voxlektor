@@ -34,6 +34,11 @@ domain | contracts   pure logic, no I/O, no numpy | public versioned contracts
 Before adding or moving a module, load skill `voxlektor-architecture`. A new module must be added
 to the `docs/architecture.md` section 2 map in the same change (`test_tree_documented` enforces it).
 
+## Versions
+
+First change after a release, and every release: load skill `voxlektor-release` and bump the
+version (`pyproject.toml` + `voxlektor.__version__`); the outdated-daemon check depends on it.
+
 ## Gate
 
 `uv run poe check` must be green before you say a task is done (`poe check-fast` while iterating).

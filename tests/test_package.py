@@ -1,3 +1,4 @@
+import tomllib
 from importlib.metadata import metadata
 from pathlib import Path
 
@@ -8,7 +9,9 @@ _REPO = "https://github.com/MlecznyU/voxlektor"
 
 
 def test_version_is_exposed_without_side_effects() -> None:
-    assert voxlektor.__version__ == "0.1.0"
+    pyproject = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    # One version, two spellings: a bump must change both (skill voxlektor-release).
+    assert voxlektor.__version__ == pyproject["project"]["version"]
 
 
 def test_package_metadata_declares_license_and_urls() -> None:

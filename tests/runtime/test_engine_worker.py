@@ -210,7 +210,7 @@ class _GatedEngine(FakeEngine):
         return super().synthesize(text, lang, prompt)
 
 
-def test_queued_generates_older_than_the_epoch_are_skipped_silently(
+def test_queued_generates_of_a_cancelled_epoch_are_skipped_silently(
     repo: InMemoryVoiceRepository,
 ) -> None:
     provider = _Provider(_GatedEngine)
@@ -230,8 +230,7 @@ def test_queued_generates_older_than_the_epoch_are_skipped_silently(
         rec.submit(worker, "g1", gen(1, 0))
         rec.submit(worker, "g2", gen(2, 0))
         rec.submit(worker, "g3", gen(3, 1))
-        worker.cancel_before(Epoch(1))
-        worker.cancel_before(Epoch(0))  # never lowers it
+        worker.cancel_epochs([Epoch(0)])  # g0 runs already and cannot be interrupted
         engine.gate.set()
         assert [label for label, _, _ in rec.take(2)] == ["g0", "g3"]
     finally:

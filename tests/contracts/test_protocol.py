@@ -50,6 +50,7 @@ def test_error_codes_are_closed_and_stable() -> None:
         "audio_failed",
         "unsupported",
         "internal",
+        "busy",
     ]
 
 
@@ -73,6 +74,7 @@ def test_golden_requests_cover_every_command() -> None:
         "unload",
         "shutdown",
         "subscribe",
+        "load",
     }
 
 

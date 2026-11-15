@@ -7,6 +7,7 @@ import pytest
 from voxlektor.app.commands import (
     Back,
     Command,
+    Load,
     Pause,
     Resume,
     SetIdle,
@@ -65,10 +66,12 @@ STATUS_KEYS = {
     "waiting",
     "groups",
     "tag",
+    "version",
 }
 CAPS = [
     "back",
     "idle",
+    "load",
     "pause",
     "resume",
     "shutdown",
@@ -76,6 +79,7 @@ CAPS = [
     "speak",
     "status",
     "stop_reading",
+    "subscribe",
     "unload",
 ]
 FAKE_FAILURE = "fake engine failure on 'BOOM'"
@@ -277,6 +281,91 @@ def test_shutdown_stops_unloads_and_exits() -> None:
     assert sim.exited
     assert sim.status()["state"] == "cold"
     assert sim.engine.unload_calls == 1
+
+
+def test_if_idle_shutdown_refused_when_busy() -> None:
+    sim = _sim(auto_complete=False)
+    sim.handle(_speak(_text("a", "b")))
+    playing = sim.playing
+    before = list(sim.effects)
+    reply = sim.handle(Shutdown(if_idle=True))
+    assert not reply.ok
+    assert reply.error is not None
+    assert reply.error.code == "busy"
+    assert reply.error.message == "the daemon is reading"
+    assert sim.effects == before  # nothing stopped, nothing exits
+    assert not sim.exited
+    assert sim.playing == playing
+    assert sim.status()["state"] == "warm"
+
+
+def test_if_idle_shutdown_refused_while_only_queued() -> None:
+    sim = _sim()
+    sim.auto_run = False
+    sim.handle(_speak(_text("a")))  # queued while the engine loads: nothing plays yet
+    reply = sim.handle(Shutdown(if_idle=True))
+    assert reply.error is not None
+    assert reply.error.code == "busy"
+    assert not sim.exited
+
+
+def test_if_idle_shutdown_when_idle_exits() -> None:
+    sim = _sim()
+    sim.handle(_speak(_text("a")))  # read to the end: the daemon is idle and warm
+    reply = sim.handle(Shutdown(if_idle=True))
+    assert reply.ok
+    assert sim.exited
+    assert isinstance(_without_events(sim.effects)[-1], Exit)
+    assert sim.status()["state"] == "cold"
+
+
+def test_load_warms_without_reading() -> None:
+    sim = _sim()
+    sim.auto_run = False
+    reply = sim.handle(Load())
+    assert reply.ok
+    assert reply.data == {}
+    assert _of(sim, LoadEngine) == [LoadEngine(EngineId("fake"))]
+    assert sim.status()["state"] == "loading"
+    assert _of(sim, ScheduleWake) == []
+    sim.run_until_idle()  # on_loaded: warm, then the usual idle timeout
+    assert sim.status()["state"] == "warm"
+    assert _of(sim, ScheduleWake) == [ScheduleWake(600.0)]
+    assert _count(sim, Generate) == 0
+    assert _count(sim, PrepareVoice) == 0
+    assert sim.output.started == []
+    sim.advance(601)
+    sim.run_until_idle()  # the unload job
+    assert sim.status()["state"] == "cold"
+
+
+def test_load_when_warm_and_idle_restarts_the_idle_timeout() -> None:
+    sim = _sim()
+    sim.handle(_speak(_text("a")))
+    sim.advance(300)
+    assert sim.handle(Load()).ok
+    assert _count(sim, LoadEngine) == 1
+    assert _of(sim, ScheduleWake)[-1] == ScheduleWake(900.0)
+    sim.advance(599)
+    assert sim.status()["state"] == "warm"
+
+
+def test_load_during_a_reading_changes_nothing() -> None:
+    sim = _sim(auto_complete=False)
+    sim.handle(_speak(_text("a", "b")))
+    before = list(sim.effects)
+    assert sim.handle(Load()).ok
+    assert _without_events(sim.effects) == _without_events(before)
+    assert sim.status()["playing"] is True
+
+
+def test_status_has_version() -> None:
+    clock = FakeClock()
+    session = Session(Settings(engine=EngineId("fake")), _catalog(), clock, version="1.2.3")
+    outcome = session.handle(Status())
+    assert outcome.reply is not None
+    assert outcome.reply.data["version"] == "1.2.3"
+    assert _sim().status()["version"] == "0"
 
 
 def test_speak_during_loading_is_queued_and_plays_after_load() -> None:
@@ -939,6 +1028,33 @@ def test_back_while_head_waits_keeps_order() -> None:
     assert _played_tags(sim) == ["a", "a", "b", "c", "d"]
 
 
+def test_back_under_the_hold_with_no_holder_and_no_history_is_noop() -> None:
+    """The hold keeps g2 from taking the floor after g1 is skipped; nothing finished yet.
+
+    An ownerless back then has no target: it changes nothing, so g2's ready audio (its epoch
+    unchanged) stays valid and plays on resume. Found by the stateful test.
+    """
+    sim = _sim(auto_complete=False)
+    sim.auto_run = False
+    sim.handle(_speak(_text("a1", "a2")))  # g1; the engine load waits in the worker queue
+    sim.handle(Pause())  # the daemon-wide hold
+    sim.handle(Skip())  # a1 skipped before it was generated
+    sim.handle(_speak(_text("b1", "b2")))  # g2, same owner, same epoch
+    sim.run_until_idle()  # a2 and b1 ready
+    sim.handle(Skip())  # a2 skipped: g1 is gone, the hold keeps g2 off the floor
+    assert sim.status()["floor"] is None
+    before = len(sim.effects)
+    assert sim.handle(Back()).ok
+    assert sim.effects[before:] == []
+    sim.handle(Resume())
+    sim.run_until_idle()
+    while sim.playing is not None:
+        sim.complete()
+        sim.run_until_idle()
+    assert _played_tags(sim) == ["b1", "b2"]
+    assert {epoch for _, epoch in sim.started} == {Epoch(0)}
+
+
 def test_history_is_bounded() -> None:
     sim = _sim(Settings(history=1))
     sim.handle(_speak(_text("a", "b", "c")))
@@ -1056,6 +1172,7 @@ def test_status_contains_every_key_and_caps() -> None:
         "waiting": 0,
         "groups": [],
         "tag": None,
+        "version": "0",
     }
 
 
@@ -1186,5 +1303,7 @@ def test_commands_are_plain_values() -> None:
         SetIdle("1m"),
         Unload(),
         Shutdown(),
+        Shutdown(if_idle=True),
+        Load(),
     ]
     assert len(set(commands)) == len(commands)

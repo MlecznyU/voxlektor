@@ -15,7 +15,7 @@ def test_lists_bundled_voices_and_marks_the_default(
     lines = capsys.readouterr().out.splitlines()
     assert "* v0-default" in lines
     assert "  m1-calm" in lines
-    assert len(lines) == 7
+    assert len(lines) == 12
     assert wire.requests == []
 
 
@@ -38,7 +38,7 @@ def test_voices_json(
     assert out.count("\n") == 1
     data = json.loads(out)
     assert data["default"] == "m1-calm"
-    assert len(data["voices"]) == 7
+    assert len(data["voices"]) == 12
     assert data["voices"] == sorted(data["voices"])
     assert "v0-default" in data["voices"]
     assert wire.requests == []

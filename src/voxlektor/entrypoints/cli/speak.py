@@ -12,8 +12,12 @@ without restarting the daemon. With ``service.autostart = false`` the text is re
 Speaking is gated on setup: until ``vxl setup`` has completed (the store's marker), any text,
 from any source and also in one-shot mode, exits 1 with ``voxlektor is not set up yet; run: vxl
 setup``. The gate is in the CLI only; the daemon and the protocol do not check it.
+
+``say`` starts work, so it replaces an idle daemon of another version (``ClientContext.ensure``
+with ``work``); a busy one is kept and ``--json`` adds ``"daemon_outdated": true``.
 """
 
+import json
 import stat
 import sys
 from pathlib import Path
@@ -46,6 +50,19 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
     volume: Annotated[
         int | None, typer.Option("--volume", help="Volume, 0 to 100; 50 = even level.")
     ] = None,
+    owner: Annotated[
+        str | None, typer.Option("--owner", help="Owner of the reading (a named client).")
+    ] = None,
+    group: Annotated[
+        str | None, typer.Option("--group", help="Reading group the text belongs to.")
+    ] = None,
+    tag: Annotated[str | None, typer.Option("--tag", help="Tag echoed back in the events.")] = None,
+    preempt: Annotated[
+        bool, typer.Option("--preempt", help="Take the floor from the current owner.")
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the daemon's reply data as one JSON line.")
+    ] = False,
 ) -> int:
     """Read text aloud (the default command)."""
     content = _resolve_text(text or [], file)
@@ -59,9 +76,13 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
         from voxlektor.entrypoints import oneshot  # noqa: PLC0415  # heavy: engine stack
 
         return oneshot.run(content, ctx.settings)
-    ctx.ensure()
+    ctx.ensure(work=True)
     settings = ctx.settings
-    ctx.send(
+    extra: dict[str, object] = {"preempt": True} if preempt else {}
+    for key, value in (("owner", owner), ("group", group), ("tag", tag)):
+        if value is not None:
+            extra[key] = value
+    data = ctx.send(
         "speak",
         text=content,
         voice=settings.voice,
@@ -70,7 +91,10 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
         rate=settings.rate,
         now=now,
         volume=settings.volume,
+        **extra,
     )
+    if as_json:
+        print(json.dumps({**data, "daemon_outdated": True} if ctx.daemon_outdated else data))
     return EXIT_OK
 
 

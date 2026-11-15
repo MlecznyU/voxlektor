@@ -25,7 +25,7 @@ domain | contracts   pure logic with no I/O and no numpy | public, versioned con
 src/voxlektor/
   __init__.py                 only __version__ (no imports, so that `vxl` starts fast)
   __main__.py                 -> entrypoints.cli.app:main
-  bundled_voices/<7>/{ref.wav,ref.txt,voice.toml}
+  bundled_voices/<12>/{ref.wav,ref.txt,voice.toml}
   bundled_cues/stopped_en.wav the STOPPED cue; made once by scripts/make_cues.py (real OmniVoice)
 
   contracts/                  PUBLIC, VERSIONED
@@ -61,7 +61,7 @@ src/voxlektor/
     loop.py                   CoreLoop: asyncio, calls Session, executes Effects, call_soon_threadsafe, wake timers (call_at)
     engine_worker.py          EngineWorker: ONE thread, FIFO, epochs, cooperative cancellation (stale queued Generates skipped)
     buffers.py                AudioBuffers: ChunkId -> AudioChunk (numpy outside Session), bounded (raises past max_items)
-    events.py                 EventHub (groundwork for subscribe; unused by the CLI in the MVP)
+    events.py                 EventHub: fan-out of Emit; subscribe_bounded() queues (None = overflow); BoundedSubscription
 
   adapters/                   technology; families independent of each other
     engines/omnivoice_mlx.py  OmniVoice via mlx-audio; pinned revision; returns numpy copies; NO file I/O
@@ -77,8 +77,9 @@ src/voxlektor/
     platform/macos.py         paths (0700), hardware
     platform/unsupported.py   "platform not supported yet"
     transport/mapping.py      wire v1 <-> application commands (the ONLY place that knows both)
-    transport/unix_server.py  asyncio server: frames (one line each, several per connection), MAX_FRAME, 0600
+    transport/unix_server.py  asyncio server: frames (one line each, several per connection), MAX_FRAME, 0600; subscribe -> event stream (closed on overflow)
     transport/unix_client.py  blocking client (no asyncio): request(), probe() (also used by `serve`)
+    transport/unix_stream.py  blocking event-stream reader (no asyncio): open_stream() = subscribe, then data+event per frame until EOF; write side kept open
     procs/spawn.py            daemon spawn (argv, start_new_session), stale regular file at the socket path
     terminal/menus.py         QuestionaryPrompter: arrow-key menus for `vxl setup` (Esc / no answer -> SetupCancelled; Ctrl+C propagates)
 
@@ -91,6 +92,8 @@ src/voxlektor/
 
   entrypoints/
     cli/{app,speak,control,voices,config,output,setup}.py
+    cli/warm.py               `vxl warm`: start the daemon if needed (outdated idle daemon replaced) and request `load`; returns at once
+    cli/watch.py              `vxl watch`: event stream to stdout (JSON lines or one human line each), --owner filter, daemon_off retry, disconnected = exit 2
     daemon.py                 `serve`: platform check, single instance (flock voxlektor.lock), stale socket, rotating log, signals
     oneshot.py                in-process reading (CoreLoop without transport)
 

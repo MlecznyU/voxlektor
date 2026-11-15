@@ -13,8 +13,7 @@ the chunk's volume) and how long it took; every other job yields ``None``.
 Epochs and cooperative cancellation: the loop thread calls ``cancel_epochs(epochs)`` for each
 ``CancelGeneration`` effect, naming exactly the epochs the Session has abandoned. The cancelled
 set is a frozenset that the loop thread replaces (under the lock) and the worker thread only
-reads. ``cancel_before(epoch)`` (a lower bound) remains for callers that cancel everything
-older. A queued ``Generate`` whose chunk epoch is cancelled is skipped when its turn comes and
+reads. A queued ``Generate`` whose chunk epoch is cancelled is skipped when its turn comes and
 reports nothing: the Session has already forgotten it. A synthesis that is running is never
 interrupted (OmniVoice cannot be), so at most one chunk is wasted.
 """
@@ -68,8 +67,8 @@ class EngineWorker:
         self._level = level
         self._engine: Engine | None = None  # touched only on the worker thread
         self._prompts: dict[str, VoicePrompt] = {}  # likewise
-        self._min_epoch = 0  # written on the loop thread, read on the worker thread
-        self._cancelled: frozenset[Epoch] = frozenset()  # likewise; swapped, never mutated
+        # Written on the loop thread, read on the worker thread; swapped, never mutated.
+        self._cancelled: frozenset[Epoch] = frozenset()
         self._tasks: queue.SimpleQueue[_Task | None] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._closed = False
@@ -87,10 +86,6 @@ class EngineWorker:
             if self._closed:
                 raise RuntimeError("the engine worker is closed")
             self._tasks.put(_Task(job, on_result, on_error))
-
-    def cancel_before(self, epoch: Epoch) -> None:
-        """Skip queued ``Generate`` jobs of chunks older than ``epoch`` (never lowers it)."""
-        self._min_epoch = max(self._min_epoch, epoch)
 
     def cancel_epochs(self, epochs: Iterable[Epoch]) -> None:
         """Skip queued ``Generate`` jobs of chunks of ``epochs`` (added to those cancelled)."""
@@ -130,7 +125,7 @@ class EngineWorker:
             self._call(task.on_result, result)
 
     def _stale(self, epoch: Epoch) -> bool:
-        return epoch < self._min_epoch or epoch in self._cancelled
+        return epoch in self._cancelled
 
     @staticmethod
     def _call[T](callback: Callable[[T], None], value: T) -> None:

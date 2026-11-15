@@ -366,6 +366,16 @@ def test_check_before_setup_exits_1_and_reports_why(
     assert hub.downloads == []
 
 
+def test_check_lists_features(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, data = _check(capsys)
+    assert data["features"] == ["owners", "tags", "warm", "watch"]
+    assert data["features"] == sorted(data["features"])
+    assert list(setup_cli.FEATURES) == data["features"]
+    assert fresh_wire.requests == []  # readable without a daemon
+
+
 def test_check_after_setup_with_the_model_present_exits_0(
     fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
 ) -> None:

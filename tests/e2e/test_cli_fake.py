@@ -5,17 +5,22 @@ found by its environment (so also one spawned before its pid file existed), and 
 none remains and the pid file is gone.
 """
 
+import json
 import os
+import select
 import signal
 import socket
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import pytest
 
+import voxlektor
 from tests.fixtures.sockets import wait_for_exit, wait_for_file
 
 pytestmark = pytest.mark.e2e
@@ -174,3 +179,68 @@ def test_control_without_daemon_exits_2_and_stop_is_quiet(vxl: _Cli) -> None:
     stop = vxl("stop")
     assert stop.returncode == 0
     assert stop.stdout.strip() == "not running"
+
+
+class _JsonLines:
+    """Reads one JSON object per line from a pipe, each within a deadline (no blocking reads)."""
+
+    def __init__(self, pipe: IO[bytes]) -> None:
+        self._fd = pipe.fileno()
+        self._buffer = b""
+
+    def next(self, timeout: float = CLI_TIMEOUT) -> dict[str, object] | None:
+        """The next object; ``None`` at the end of the output."""
+        deadline = time.monotonic() + timeout
+        while b"\n" not in self._buffer:
+            ready, _, _ = select.select([self._fd], [], [], max(deadline - time.monotonic(), 0))
+            if not ready:
+                raise TimeoutError(f"no line within {timeout} s; got {self._buffer!r}")
+            piece = os.read(self._fd, 65536)
+            if not piece:
+                return None
+            self._buffer += piece
+        line, _, self._buffer = self._buffer.partition(b"\n")
+        return json.loads(line)
+
+
+def test_watch_follows_a_reading_until_the_daemon_stops(vxl: _Cli) -> None:
+    """The real ``vxl watch --json --start`` against the daemon it starts (memory output)."""
+    watch = subprocess.Popen(
+        [sys.executable, "-m", "voxlektor", "watch", "--json", "--start"],
+        env=vxl.env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert watch.stdout is not None
+        lines = _JsonLines(watch.stdout)
+        snapshot = lines.next()
+        assert snapshot is not None
+        assert snapshot["event"] == "snapshot"
+        assert snapshot["version"] == voxlektor.__version__
+        assert "daemon_outdated" not in snapshot
+        spoken = vxl("say", "--owner", "s1", "--tag", "t0", "Hello there, this is a test.")
+        assert spoken.returncode == 0, spoken.stderr
+        seen: list[dict[str, object]] = []
+        while not seen or seen[-1] != {"event": "drained", "owner": None, "group": None}:
+            event = lines.next()
+            assert event is not None, seen
+            seen.append(event)
+        names = [(e["event"], e.get("tag"), e.get("reason")) for e in seen]
+        assert ("tag_started", "t0", None) in names
+        assert ("tag_finished", "t0", "done") in names
+        assert {"event": "floor", "owner": "s1", "group": "g1"} in seen
+        assert {"event": "drained", "owner": "s1", "group": None} in seen
+        assert vxl("stop").returncode == 0
+        rest: list[dict[str, object]] = []
+        while (event := lines.next()) is not None:
+            rest.append(event)
+        assert rest[-1] == {"event": "disconnected"}
+        assert watch.wait(CLI_TIMEOUT) == 2
+    finally:
+        if watch.poll() is None:
+            watch.kill()
+            watch.wait(CLI_TIMEOUT)
+        for pipe in (watch.stdout, watch.stderr):
+            if pipe is not None:
+                pipe.close()

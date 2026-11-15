@@ -8,8 +8,9 @@ has to be downloaded needs ``--accept-model-license``; download progress goes to
 
 ``--check`` (no other options) changes nothing and starts nothing: it prints one JSON line
 (``ready``, ``setup_completed``, ``version``, ``config_path``, ``engine``, ``model`` with
-``present`` and its license, the effective ``settings``) and exits 0 when setup has completed
-and the model is present, 1 otherwise. It needs no terminal; tools such as dialogue-box use it.
+``present`` and its license, the effective ``settings``, the ``features`` list) and exits 0 when
+setup has completed and the model is present, 1 otherwise. It needs no terminal; tools such as
+dialogue-box use it (``features`` is the constant ``FEATURES``: what this version offers).
 
 An invalid value in ``config.toml`` or a ``VOXLEKTOR_*`` variable does not stop setup (it is
 how a broken config gets repaired): it is reported (``ignoring invalid …``), its default is
@@ -46,6 +47,9 @@ from voxlektor.entrypoints.cli.output import EXIT_OK, EXIT_USER
 if TYPE_CHECKING:
     from voxlektor.app.setup import SetupResult
 
+# What this CLI and its daemon offer, for tools such as dialogue-box (``--check`` ``features``);
+# sorted. S1: multi-client owners, tags with their events, ``vxl warm``, ``vxl watch``.
+FEATURES: tuple[str, ...] = ("owners", "tags", "warm", "watch")
 ISSUES_URL = "https://github.com/MlecznyU/voxlektor/issues"
 PULLS_URL = "https://github.com/MlecznyU/voxlektor/pulls"
 NO_TERMINAL = "vxl setup needs a terminal; for tools use: vxl setup --yes [options]"
@@ -184,6 +188,7 @@ def _check(ctx: ClientContext) -> int:
             "idle_timeout_s": settings.idle_timeout_s,
             "autostart": settings.autostart,
         },
+        "features": list(FEATURES),
     }
     print(json.dumps(report))
     return EXIT_OK if ready else EXIT_USER
