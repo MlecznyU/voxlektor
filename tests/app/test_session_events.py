@@ -8,11 +8,12 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from voxlektor.app.commands import Back, Pause, Resume, Skip, Speak, StopReading, Unload
+from voxlektor.app.effects import DropAudio, Generate
 from voxlektor.app.session import Session
 from voxlektor.app.voices import VoiceCatalog
 from voxlektor.contracts.engine import VoiceRef
 from voxlektor.domain.settings import Settings
-from voxlektor.domain.types import EngineId
+from voxlektor.domain.types import ChunkId, EngineId
 from voxlektor.testing.fakes import FakeClock, FakeEngine, InMemoryVoiceRepository, MemoryOutput
 from voxlektor.testing.simulator import Simulator
 
@@ -437,6 +438,135 @@ def test_status_groups_order() -> None:
     ]
 
 
+# ---------------------------------------------------------------- tag navigation (0.4.0)
+
+
+def _played(sim: Simulator) -> list[str]:
+    return [sim.chunks[c].text.split()[0] for c in sim.output.started]
+
+
+def _generated(sim: Simulator) -> list[ChunkId]:
+    return [e.chunk.id for e in sim.effects if isinstance(e, Generate)]
+
+
+def test_tag_skip_drops_the_run_and_plays_the_ready_next_tag() -> None:
+    sim = _sim(ahead=4)
+    _say(sim, "a", "p1", "p2", "p3", tag="t1", group="r")
+    _say(sim, "a", "q1", "q2", tag="t2", group="r")
+    generated = _generated(sim)
+    sim.handle(Skip(owner="a", unit="tag"))
+    assert sim.playing in generated  # q1's audio was ready: no new generation
+    assert len(_generated(sim)) == len(generated)
+    assert _tags(sim) == [
+        ("tag_started", "t1", None),
+        ("tag_finished", "t1", "skipped"),
+        ("tag_started", "t2", None),
+    ]
+    _finish(sim)
+    assert _played(sim) == ["p1", "q1", "q2"]
+
+
+def test_tag_skip_of_an_untagged_chunk_skips_one_chunk() -> None:
+    sim = _sim()
+    _say(sim, "a", "p1", "p2")
+    sim.handle(Skip(owner="a", unit="tag"))
+    _finish(sim)
+    assert _played(sim) == ["p1", "p2"]
+
+
+def test_tag_skip_of_the_last_run_hands_the_floor_on() -> None:
+    sim = _sim()
+    _say(sim, "a", "p1", "p2", tag="t1")
+    _say(sim, "b", "q1")
+    sim.handle(Skip(owner="a", unit="tag"))
+    _finish(sim)
+    assert _played(sim) == ["p1", "q1"]
+
+
+def test_tag_back_restarts_the_run_and_keeps_the_ready_audio() -> None:
+    sim = _sim(ahead=4)
+    _say(sim, "a", "p1", "p2", "p3", tag="t1", group="r")
+    _say(sim, "a", "q1", tag="t2", group="r")
+    sim.complete()  # p1; p2 plays, p3 and q1 are ready
+    before = len(sim.effects)
+    sim.handle(Back(owner="a", unit="tag"))
+    after = sim.effects[before:]
+    assert not [e for e in after if isinstance(e, DropAudio)]
+    assert len([e for e in after if isinstance(e, Generate)]) == 2  # p1 and p2 again
+    _finish(sim)
+    assert _played(sim) == ["p1", "p2", "p1", "p2", "p3", "q1"]
+    assert _tags(sim) == [
+        ("tag_started", "t1", None),
+        ("tag_finished", "t1", "back"),
+        ("tag_started", "t1", None),
+        ("tag_finished", "t1", "done"),
+        ("tag_started", "t2", None),
+        ("tag_finished", "t2", "done"),
+    ]
+
+
+def test_tag_back_at_the_start_of_a_run_replays_the_previous_run() -> None:
+    sim = _sim()
+    _say(sim, "a", "p1", "p2", tag="t1", group="r")
+    _say(sim, "a", "q1", "q2", tag="t2", group="r")
+    sim.complete()
+    sim.complete()  # q1 plays: nothing of t2 has finished yet
+    sim.handle(Back(owner="a", unit="tag"))
+    _finish(sim)
+    assert _played(sim) == ["p1", "p2", "q1", "p1", "p2", "q1", "q2"]
+    assert _tags(sim)[2:] == [
+        ("tag_started", "t2", None),
+        ("tag_finished", "t2", "back"),
+        ("tag_started", "t1", None),
+        ("tag_finished", "t1", "done"),
+        ("tag_started", "t2", None),
+        ("tag_finished", "t2", "done"),
+    ]
+
+
+def test_tag_back_of_a_first_run_restarts_it() -> None:
+    sim = _sim()
+    _say(sim, "a", "p1", "p2", tag="t1")
+    sim.handle(Back(owner="a", unit="tag"))  # no history: p1 again
+    _finish(sim)
+    assert _played(sim) == ["p1", "p1", "p2"]
+
+
+def test_tag_back_from_idle_replays_the_last_run() -> None:
+    sim = _sim()
+    _say(sim, "a", "p1", "p2", tag="t1")
+    _say(sim, "a", "q1", "q2", tag="t2")
+    _finish(sim)
+    sim.handle(Back(owner="a", unit="tag"))  # a holds nothing: no-op
+    sim.handle(Back(unit="tag"))  # the last owner's last run
+    _finish(sim)
+    assert _played(sim) == ["p1", "p2", "q1", "q2", "q1", "q2"]
+
+
+def test_tag_back_moves_one_chunk_around_untagged_chunks() -> None:
+    sim = _sim()
+    _say(sim, "a", "u1", "u2", group="r")
+    _say(sim, "a", "q1", tag="t2", group="r")
+    sim.complete()
+    sim.complete()  # q1 plays; the run before it is untagged: only u2 comes back
+    sim.handle(Back(owner="a", unit="tag"))
+    sim.complete()  # u2
+    sim.handle(Back(owner="a", unit="tag"))  # q1's head is tagged, u2 untagged: u2 again
+    _finish(sim)
+    sim.handle(Back(unit="tag"))  # idle, last played q1 (tagged): t2 only
+    _finish(sim)
+    assert _played(sim) == ["u1", "u2", "q1", "u2", "q1", "u2", "q1", "q1"]
+
+
+def test_tag_back_of_an_untagged_head_goes_back_one_chunk() -> None:
+    sim = _sim()
+    _say(sim, "a", "u1", "u2")
+    sim.complete()
+    sim.handle(Back(owner="a", unit="tag"))
+    _finish(sim)
+    assert _played(sim) == ["u1", "u2", "u1", "u2"]
+
+
 # ---------------------------------------------------------------- property
 
 
@@ -444,7 +574,12 @@ OWNERS = st.sampled_from([None, "a", "b"])
 WORDS = st.sampled_from([("p",), ("p", "q"), ("p", "q", "r"), ("p", "q", "r"), ("p", "BOOM"), ()])
 OPS = st.one_of(
     st.tuples(st.just("speak"), OWNERS, WORDS, st.booleans(), st.booleans(), st.booleans()),
-    st.tuples(st.sampled_from(["stop", "skip", "back", "back", "pause", "resume"]), OWNERS),
+    st.tuples(
+        st.sampled_from(
+            ["stop", "skip", "back", "back", "pause", "resume", "skip_tag", "back_tag", "back_tag"]
+        ),
+        OWNERS,
+    ),
     st.tuples(st.sampled_from(["complete"] * 6 + ["fail_play", "advance", "advance"])),
 )
 
@@ -465,6 +600,10 @@ def _run(sim: Simulator, op: tuple[object, ...], index: int) -> str | None:
     commands = {"stop": StopReading, "skip": Skip, "back": Back, "pause": Pause, "resume": Resume}
     if name in commands:
         sim.handle(commands[str(name)](owner))
+    elif name == "skip_tag":
+        sim.handle(Skip(owner, unit="tag"))
+    elif name == "back_tag":
+        sim.handle(Back(owner, unit="tag"))
     elif name == "advance":
         sim.advance(5)
     elif sim.playing is not None:
@@ -494,7 +633,7 @@ def test_tags_end_exactly_once(ops: list[tuple[object, ...]]) -> None:
         assert event.event in EVENT_NAMES
         assert "owner" in event.data
         assert "group" in event.data
-    backs = any(op[0] == "back" for op in ops)
+    backs = any(op[0] in {"back", "back_tag"} for op in ops)
     for tag in accepted:
         marks = "".join(
             "S" if name == "tag_started" else "F"

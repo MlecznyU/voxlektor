@@ -76,12 +76,17 @@ class ResumeRequest(_Request, tag="resume"):
     owner: _Owner | None = None  # Added within v1 (S1)
 
 
+NavUnit = Literal["chunk", "tag"]
+
+
 class SkipRequest(_Request, tag="skip"):
     owner: _Owner | None = None  # Added within v1 (S1)
+    unit: NavUnit = "chunk"  # Added within v1 (0.4.0, cap ``tag_nav``): "tag" = the whole tag run
 
 
 class BackRequest(_Request, tag="back"):
     owner: _Owner | None = None  # Added within v1 (S1)
+    unit: NavUnit = "chunk"  # Added within v1 (0.4.0, cap ``tag_nav``): "tag" = the whole tag run
 
 
 class StopReadingRequest(_Request, tag="stop_reading"):

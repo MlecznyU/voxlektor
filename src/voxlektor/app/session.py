@@ -233,11 +233,11 @@ class Session:
             case Resume(owner):
                 self._resume(owner)
                 reply = _ok()
-            case Skip(owner):
-                self._skip(owner, out)
+            case Skip(owner, unit):
+                self._skip(owner, out, by_tag=unit == "tag")
                 reply = _ok()
-            case Back(owner):
-                self._back(owner, out)
+            case Back(owner, unit):
+                self._back(owner, out, by_tag=unit == "tag")
                 reply = _ok()
             case StopReading(owner):
                 self._kill(None if owner is None else frozenset({owner}), "stopped", out)
@@ -362,11 +362,19 @@ class Session:
         if owner is not None:
             self._floor.resume_owner(owner, now)
 
-    def _skip(self, owner: str | None, out: list[Effect]) -> None:
+    def _skip(self, owner: str | None, out: list[Effect], *, by_tag: bool) -> None:
+        """Skip the holder's head chunk; ``by_tag``: every chunk of its tag run (one group)."""
         key = self._floor.holder
         if key is None or (owner is not None and key[0] != owner):
             return
         self._interrupted = True
+        group = self._groups[key]
+        speak = self._items[group.chunks[0]].speak if by_tag else None
+        self._skip_head(key, out)
+        while speak is not None and group.chunks and self._items[group.chunks[0]].speak == speak:
+            self._skip_head(key, out)
+
+    def _skip_head(self, key: GroupKey, out: list[Effect]) -> None:
         group = self._groups[key]
         head = group.chunks.popleft()
         self._tag_ends(self._items[head], "skipped", out)
@@ -385,7 +393,13 @@ class Session:
         if not group.chunks:
             self._remove_group(key)
 
-    def _back(self, owner: str | None, out: list[Effect]) -> None:
+    def _back(self, owner: str | None, out: list[Effect], *, by_tag: bool) -> None:
+        """Requeue the owner's previous chunk (``by_tag``: tag run) at the front of its groups.
+
+        A chunk-level back regenerates everything of the owner under a fresh epoch. A tag-level
+        back keeps the audio already generated ahead and regenerates only what comes back from
+        the history plus the chunk that was playing.
+        """
         holder = self._floor.holder
         if owner is None:
             target = holder[0] if holder is not None else self._last_owner
@@ -399,9 +413,11 @@ class Session:
         history = self._histories.get(target, deque[ChunkId]())
         if head_key is None and not history:
             return
+        head = self._groups[head_key].chunks[0] if head_key is not None else None
+        pulled = self._run_back(head, history) if by_tag else min(1, len(history))
         self._interrupted = True
         was_active = bool(self._groups)
-        self._drop_work(frozenset({target}), out)
+        self._drop_work(frozenset({target}), out, keep_ready=by_tag)
         epoch = self._peek_epoch()
         self._epoch, self._epoch_used = epoch, True
         if not was_active:
@@ -412,7 +428,7 @@ class Session:
             now = self._clock.now()
             self._groups[head_key] = Group(epoch, now, auto=True)
             self._floor.add(head_key, now)
-        if history:
+        for _ in range(pulled):
             self._groups[head_key].chunks.appendleft(history.pop())
         for cid in self._groups[head_key].chunks:
             item = self._items[cid]
@@ -423,8 +439,37 @@ class Session:
             group.epoch = epoch
             group.chunks = deque(self._requeue(cid, key, was_active) for cid in group.chunks)
 
+    def _run_back(self, head: ChunkId | None, history: deque[ChunkId]) -> int:
+        """How many of the newest ``history`` chunks a tag-level back brings back.
+
+        The played part of ``head``'s tag run (it restarts); when none of it has played, the
+        whole run played last before it. An untagged chunk counts as a run of its own.
+        """
+        speak = None if head is None else self._items[head].speak
+        if head is not None and speak is None:
+            return min(1, len(history))
+        played = self._run_tail(history, speak) if speak is not None else 0
+        if played or not history:
+            return played
+        last = self._items[history[-1]].speak
+        return 1 if last is None else self._run_tail(history, last)
+
+    def _run_tail(self, history: deque[ChunkId], speak: int) -> int:
+        """The number of newest ``history`` chunks that belong to tag run ``speak``."""
+        count = 0
+        for cid in reversed(history):
+            if self._items[cid].speak != speak:
+                break
+            count += 1
+        return count
+
     def _requeue(self, cid: ChunkId, key: GroupKey, was_active: bool) -> ChunkId:
-        """``cid`` again under a fresh id and the epoch of group ``key``."""
+        """``cid`` again under a fresh id and the epoch of group ``key``.
+
+        A chunk whose audio is ready (kept by a tag-level back) keeps its id: its audio stays.
+        """
+        if self._ahead.get(cid) is Gen.READY:
+            return cid
         item = self._items.pop(cid)
         new_id = ChunkId(self._next_id)
         self._next_id += 1
@@ -659,13 +704,20 @@ class Session:
             # an owner with nothing left is not paused
             self._floor.resume_owner(key[0], self._clock.now())
 
-    def _drop_work(self, owners: _Owners, out: list[Effect]) -> None:
-        """Abort, drop and cancel everything in progress of ``owners``' groups (dead epoch)."""
+    def _drop_work(self, owners: _Owners, out: list[Effect], *, keep_ready: bool = False) -> None:
+        """Abort, drop and cancel everything in progress of ``owners``' groups (dead epoch).
+
+        ``keep_ready`` keeps the audio already generated (a tag-level back).
+        """
         playing = self._playing
         if playing is not None and _hits(owners, self._items[playing].group[0]):
             out.append(AbortPlayback())
             self._playing = None
-        doomed = [c for c in self._ahead if _hits(owners, self._items[c].group[0])]
+        doomed = [
+            c
+            for c, state in self._ahead.items()
+            if _hits(owners, self._items[c].group[0]) and not (keep_ready and state is Gen.READY)
+        ]
         ready = tuple(c for c in doomed if self._ahead[c] is Gen.READY)
         if ready:
             out.append(DropAudio(ready))

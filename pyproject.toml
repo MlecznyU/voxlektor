@@ -1,6 +1,6 @@
 [project]
 name = "voxlektor"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local text-to-speech service and CLI"
 readme = "README.md"
 license = "Apache-2.0"

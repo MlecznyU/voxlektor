@@ -53,6 +53,8 @@ from voxlektor.testing.simulator import Simulator
         (wire.ResumeRequest(v=1, id="1", owner="o"), Resume(owner="o")),
         (wire.SkipRequest(v=1, id="1", owner="o"), Skip(owner="o")),
         (wire.BackRequest(v=1, id="1", owner="o"), Back(owner="o")),
+        (wire.SkipRequest(v=1, id="1", owner="o", unit="tag"), Skip(owner="o", unit="tag")),
+        (wire.BackRequest(v=1, id="1", unit="tag"), Back(unit="tag")),
         (wire.StopReadingRequest(v=1, id="1", owner="o"), StopReading(owner="o")),
         (
             wire.SpeakRequest(v=1, id="1", text="hi", base_lang="en"),

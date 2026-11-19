@@ -31,21 +31,13 @@ from voxlektor.domain.errors import DomainError, UnknownVoice
 _RENAMED = {"unsupported_platform": wire.ErrorCode.unsupported}
 
 
-# Reading-control requests: they carry only the optional ``owner``.
+# Reading-control requests that carry only the optional ``owner`` (skip/back also a ``unit``).
 _OWNED: dict[type[wire.Request], Callable[..., Command]] = {
     wire.PauseRequest: Pause,
     wire.ResumeRequest: Resume,
-    wire.SkipRequest: Skip,
-    wire.BackRequest: Back,
     wire.StopReadingRequest: StopReading,
 }
-_OWNED_REQUESTS = (
-    wire.PauseRequest,
-    wire.ResumeRequest,
-    wire.SkipRequest,
-    wire.BackRequest,
-    wire.StopReadingRequest,
-)
+_OWNED_REQUESTS = (wire.PauseRequest, wire.ResumeRequest, wire.StopReadingRequest)
 
 # Requests that carry no arguments.
 _PLAIN: dict[type[wire.Request], Callable[[], Command]] = {
@@ -71,6 +63,9 @@ def to_command(req: wire.Request) -> Command:
             preempt=req.preempt,
             steps=req.steps,
         )
+    if isinstance(req, wire.SkipRequest | wire.BackRequest):
+        nav = Skip if isinstance(req, wire.SkipRequest) else Back
+        return nav(req.owner, req.unit)
     if isinstance(req, _OWNED_REQUESTS):
         return _OWNED[type(req)](owner=req.owner)
     if isinstance(req, wire.IdleRequest):

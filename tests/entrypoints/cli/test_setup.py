@@ -607,7 +607,7 @@ def test_check_lists_features(
     fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _, data = _check(capsys)
-    assert data["features"] == ["owners", "profiles", "steps", "tags", "warm", "watch"]
+    assert data["features"] == ["owners", "profiles", "steps", "tag_nav", "tags", "warm", "watch"]
     assert data["features"] == sorted(data["features"])
     assert list(setup_cli.FEATURES) == data["features"]
     assert fresh_wire.requests == []  # readable without a daemon

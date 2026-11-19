@@ -1,5 +1,6 @@
 cli:vxl back
 cli:vxl back --owner (default=None)
+cli:vxl back --unit (default=<NavUnit.chunk: 'chunk'>)
 cli:vxl config
 cli:vxl config show
 cli:vxl config show --profile (default=None)
@@ -49,6 +50,7 @@ cli:vxl setup --volume (default=None)
 cli:vxl setup --yes (default=False)
 cli:vxl skip
 cli:vxl skip --owner (default=None)
+cli:vxl skip --unit (default=<NavUnit.chunk: 'chunk'>)
 cli:vxl status
 cli:vxl status --json (default=False)
 cli:vxl stop
@@ -151,10 +153,12 @@ voxlektor.adapters.transport.unix_server:Subscription.queue(self) -> asyncio.que
 voxlektor.adapters.transport.unix_server:Subscription.snapshot(self) -> collections.abc.Mapping[str, object]
 voxlektor.adapters.transport.unix_server:async serve_unix(path: pathlib.Path, handler: _Handler, *, on_ready: collections.abc.Callable[[], None] | None, subscribe: collections.abc.Callable[[], voxlektor.adapters.transport.unix_server.Subscription] | None = None) -> asyncio.base_events.Server
 voxlektor.adapters.transport.unix_stream:open_stream(path: pathlib.Path, timeout: float) -> collections.abc.Iterator[dict[str, object]]
-voxlektor.app.commands:Back(owner: str | None = None) -> None
+voxlektor.app.commands:Back(owner: str | None = None, unit: NavUnit = 'chunk') -> None
 voxlektor.app.commands:Back.owner: str | None
+voxlektor.app.commands:Back.unit: NavUnit
 voxlektor.app.commands:Command: TypeAlias = voxlektor.app.commands.Speak | voxlektor.app.commands.Pause | voxlektor.app.commands.Resume | voxlektor.app.commands.Skip | voxlektor.app.commands.Back | voxlektor.app.commands.StopReading | voxlektor.app.commands.Status | voxlektor.app.commands.SetIdle | voxlektor.app.commands.Unload | voxlektor.app.commands.Shutdown | voxlektor.app.commands.Load
 voxlektor.app.commands:Load() -> None
+voxlektor.app.commands:NavUnit: TypeAlias = Literal['chunk', 'tag']
 voxlektor.app.commands:Pause(owner: str | None = None) -> None
 voxlektor.app.commands:Pause.owner: str | None
 voxlektor.app.commands:Resume(owner: str | None = None) -> None
@@ -163,8 +167,9 @@ voxlektor.app.commands:SetIdle(timeout: str) -> None
 voxlektor.app.commands:SetIdle.timeout: str
 voxlektor.app.commands:Shutdown(if_idle: bool = False) -> None
 voxlektor.app.commands:Shutdown.if_idle: bool
-voxlektor.app.commands:Skip(owner: str | None = None) -> None
+voxlektor.app.commands:Skip(owner: str | None = None, unit: NavUnit = 'chunk') -> None
 voxlektor.app.commands:Skip.owner: str | None
+voxlektor.app.commands:Skip.unit: NavUnit
 voxlektor.app.commands:Speak(text: str, voice: str | None, lang: Optional[Literal['auto', 'pl', 'en']], rate: float | None, now: bool, *, base_lang: Optional[Literal['pl', 'en']] = None, volume: int | None = None, owner: str | None = None, group: str | None = None, tag: str | None = None, preempt: bool = False, steps: int | None = None) -> None
 voxlektor.app.commands:Speak.base_lang: Optional[Literal['pl', 'en']]
 voxlektor.app.commands:Speak.group: str | None
@@ -381,9 +386,10 @@ voxlektor.contracts.engine:VoiceRef.name: str
 voxlektor.contracts.engine:VoiceRef.ref_text: str
 voxlektor.contracts.engine:VoiceRef.ref_wav: Path
 voxlektor.contracts.protocol:BackRequest [tag_field='cmd', tag='back']
-voxlektor.contracts.protocol:BackRequest(v: int, id: str, owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]] = None)
+voxlektor.contracts.protocol:BackRequest(v: int, id: str, owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]] = None, unit: Literal['chunk', 'tag'] = 'chunk')
 voxlektor.contracts.protocol:BackRequest.id: str
 voxlektor.contracts.protocol:BackRequest.owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]]
+voxlektor.contracts.protocol:BackRequest.unit: Literal['chunk', 'tag']
 voxlektor.contracts.protocol:BackRequest.v: int
 voxlektor.contracts.protocol:ErrorCode(*values)
 voxlektor.contracts.protocol:ErrorCode.audio_failed = 'audio_failed'
@@ -413,6 +419,7 @@ voxlektor.contracts.protocol:LoadRequest(v: int, id: str)
 voxlektor.contracts.protocol:LoadRequest.id: str
 voxlektor.contracts.protocol:LoadRequest.v: int
 voxlektor.contracts.protocol:MAX_FRAME = 1048576
+voxlektor.contracts.protocol:NavUnit: TypeAlias = Literal['chunk', 'tag']
 voxlektor.contracts.protocol:OWNER_PATTERN = '^[A-Za-z0-9._:-]{1,64}$'
 voxlektor.contracts.protocol:PROTOCOL_VERSION = 1
 voxlektor.contracts.protocol:PauseRequest [tag_field='cmd', tag='pause']
@@ -441,9 +448,10 @@ voxlektor.contracts.protocol:ShutdownRequest.id: str
 voxlektor.contracts.protocol:ShutdownRequest.if_idle: bool
 voxlektor.contracts.protocol:ShutdownRequest.v: int
 voxlektor.contracts.protocol:SkipRequest [tag_field='cmd', tag='skip']
-voxlektor.contracts.protocol:SkipRequest(v: int, id: str, owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]] = None)
+voxlektor.contracts.protocol:SkipRequest(v: int, id: str, owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]] = None, unit: Literal['chunk', 'tag'] = 'chunk')
 voxlektor.contracts.protocol:SkipRequest.id: str
 voxlektor.contracts.protocol:SkipRequest.owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]]
+voxlektor.contracts.protocol:SkipRequest.unit: Literal['chunk', 'tag']
 voxlektor.contracts.protocol:SkipRequest.v: int
 voxlektor.contracts.protocol:SpeakRequest [tag_field='cmd', tag='speak']
 voxlektor.contracts.protocol:SpeakRequest(v: int, id: str, text: str, voice: str | None = None, lang: Optional[Literal['auto', 'pl', 'en']] = None, rate: float | None = None, now: bool = False, base_lang: Optional[Literal['pl', 'en']] = None, volume: Optional[Annotated[int, msgspec.Meta(ge=0, le=100)]] = None, owner: Optional[Annotated[str, msgspec.Meta(pattern='^[A-Za-z0-9._:-]{1,64}$')]] = None, group: Optional[Annotated[str, msgspec.Meta(min_length=1, max_length=128)]] = None, tag: Optional[Annotated[str, msgspec.Meta(min_length=1, max_length=128)]] = None, preempt: bool = False, steps: Optional[Annotated[int, msgspec.Meta(ge=4, le=32)]] = None)

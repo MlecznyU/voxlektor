@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 # sorted. S1: multi-client owners, tags with their events, ``vxl warm``, ``vxl watch``.
 # S2: ``steps`` (``--steps``, the ``steps`` setting and the speak field).
 # S3: ``profiles`` (``--profile``, ``vxl profiles``, ``setup --check --profile``, ``--progress``).
-FEATURES: tuple[str, ...] = ("owners", "profiles", "steps", "tags", "warm", "watch")
+FEATURES: tuple[str, ...] = ("owners", "profiles", "steps", "tag_nav", "tags", "warm", "watch")
 ISSUES_URL = "https://github.com/MlecznyU/voxlektor/issues"
 PULLS_URL = "https://github.com/MlecznyU/voxlektor/pulls"
 NO_TERMINAL = "vxl setup needs a terminal; for tools use: vxl setup --yes [options]"

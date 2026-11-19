@@ -24,6 +24,7 @@ foreground; ``entrypoints.daemon`` is imported only there (it loads asyncio and 
 
 import json
 import time
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -50,8 +51,23 @@ type _Owner = Annotated[
 ]
 
 
-def _plain(cmd: str, owner: str | None = None) -> int:
+class NavUnit(StrEnum):
+    """How far ``skip`` and ``back`` move (``tag``: needs a daemon with the ``tag_nav`` cap)."""
+
+    chunk = "chunk"
+    tag = "tag"
+
+
+type _Unit = Annotated[
+    NavUnit,
+    typer.Option("--unit", help="chunk, or tag: the whole tag run (a paragraph of a client)."),
+]
+
+
+def _plain(cmd: str, owner: str | None = None, unit: NavUnit = NavUnit.chunk) -> int:
     args: dict[str, object] = {} if owner is None else {"owner": owner}
+    if unit is not NavUnit.chunk:
+        args["unit"] = unit.value  # daemons before 0.4.0 ignore it: a plain chunk skip/back
     build_client({}).send(cmd, **args)
     return EXIT_OK
 
@@ -66,14 +82,14 @@ def resume(owner: _Owner = None) -> int:
     return _plain("resume", owner)
 
 
-def skip(owner: _Owner = None) -> int:
-    """Skip to the next chunk."""
-    return _plain("skip", owner)
+def skip(owner: _Owner = None, unit: _Unit = NavUnit.chunk) -> int:
+    """Skip to the next chunk (``--unit tag``: to the next tag)."""
+    return _plain("skip", owner, unit)
 
 
-def back(owner: _Owner = None) -> int:
-    """Go back to the previous chunk."""
-    return _plain("back", owner)
+def back(owner: _Owner = None, unit: _Unit = NavUnit.chunk) -> int:
+    """Go back to the previous chunk (``--unit tag``: to the start of the tag, or the previous)."""
+    return _plain("back", owner, unit)
 
 
 def stop_reading(owner: _Owner = None) -> int:

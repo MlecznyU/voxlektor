@@ -69,6 +69,7 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `--json` | One JSON line: the reply (`chunks`, `group`), plus `"daemon_outdated": true` when an older daemon had to be kept. |
 | `vxl pause` / `resume` | Pause and resume the reading. |
 | `vxl skip` / `back` | Next chunk / previous chunk. |
+| `--unit tag` | On `skip` / `back` (0.4.0, feature `tag_nav`): move by a whole tag (a paragraph sent with `--tag`). `skip` goes to the next tag, `back` restarts the current one, or goes to the previous one if the current one has not got past its first chunk; audio generated ahead is kept. See [Tag navigation](docs/protocol.md#tag-navigation). |
 | `vxl stop-reading` | Stop the reading; the engine stays warm. |
 | `--owner X` | On `pause`, `resume`, `skip`, `back`, `stop-reading`: act on owner X's readings only. |
 | `vxl status` | State, engine, voice, idle timer, last reading metrics; `OFF` when no daemon runs. |
@@ -97,7 +98,7 @@ arguments `vxl` reads stdin when it is piped, otherwise it prints the help.
 | `--lang L`, `--steps N` | Profile values; only with `--profile`. |
 | `--progress text\|json` | With `--yes`: `json` prints model-download progress as JSON lines on stdout (see docs/protocol.md). A usage error (bad or conflicting options) prints no JSON line at all, only the message on stderr: the exit code is authoritative. |
 | `--accept-model-license` | Needed with `--yes` when the model still has to be downloaded. |
-| `--check` | Change nothing; print one JSON line (`ready`, `setup_completed`, `version`, `protocol`, `engine`, `model` with `present` and its license, effective `settings` incl. `steps`, `features`: what this version offers, e.g. `["owners", "profiles", "steps", "tags", "warm", "watch"]`; with `--profile NAME` also `profile` and `profile_exists`, and `settings` are that profile's); exit `0` when ready, `1` if not. |
+| `--check` | Change nothing; print one JSON line (`ready`, `setup_completed`, `version`, `protocol`, `engine`, `model` with `present` and its license, effective `settings` incl. `steps`, `features`: what this version offers, e.g. `["owners", "profiles", "steps", "tag_nav", "tags", "warm", "watch"]`; with `--profile NAME` also `profile` and `profile_exists`, and `settings` are that profile's); exit `0` when ready, `1` if not. |
 
 ### Many clients at once
 

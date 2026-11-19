@@ -377,3 +377,10 @@ def test_serve_with_an_invalid_idle_exits_1(
 def test_owner_flag_is_sent_only_when_given(wire: FakeWire, command: str, wire_cmd: str) -> None:
     assert main([command, "--owner", "pi"]) == 0
     assert wire.requests == [{"cmd": wire_cmd, "owner": "pi"}]
+
+
+@pytest.mark.parametrize("command", ["skip", "back"])
+def test_unit_is_sent_only_for_tag(wire: FakeWire, command: str) -> None:
+    assert main([command, "--owner", "pi", "--unit", "tag"]) == 0
+    assert main([command, "--unit", "chunk"]) == 0
+    assert wire.requests == [{"cmd": command, "owner": "pi", "unit": "tag"}, {"cmd": command}]

@@ -4,6 +4,7 @@ Independent of the wire protocol version; ``adapters.transport.mapping`` transla
 """
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from voxlektor.domain.types import Lang, LangPref
 
@@ -41,14 +42,27 @@ class Resume:
     owner: str | None = None
 
 
+type NavUnit = Literal["chunk", "tag"]
+
+
 @dataclass(frozen=True, slots=True)
 class Skip:
+    """Skip the head chunk, or with ``unit="tag"`` the rest of its tag run (0.4.0)."""
+
     owner: str | None = None
+    unit: NavUnit = "chunk"
 
 
 @dataclass(frozen=True, slots=True)
 class Back:
+    """Back one chunk, or with ``unit="tag"`` to the start of the tag run (0.4.0).
+
+    A tag-level back restarts the current run when part of it has played, otherwise the
+    previous run; it keeps the owner's generated-ahead audio.
+    """
+
     owner: str | None = None
+    unit: NavUnit = "chunk"
 
 
 @dataclass(frozen=True, slots=True)

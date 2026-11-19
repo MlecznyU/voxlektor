@@ -31,8 +31,8 @@ person's own `vxl`). How their readings queue and what each control command touc
 | `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces all of this owner's readings, see [`now`](#speak-now-and-preempt)), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it), and, added within v1 S1 (earlier daemons ignore them): `owner?` (client id matching `^[A-Za-z0-9._:-]{1,64}$`; `cli` is reserved; default: the owner `cli`), `group?` (1 to 128 characters; default: a fresh daemon-chosen group), `tag?` (1 to 128 characters; labels every chunk of this speak, see [Tags](#tags)), `preempt?` (default false; true takes the floor at once), and, added within v1 S2 (earlier daemons ignore it): `steps?` (integer 4 to 32: diffusion steps per chunk, fewer = faster and rougher; default: the daemon's `steps` setting; engines without the notion ignore it) | `{"chunks": N, "group": "<id>"}`: number of planned chunks and the group they joined (a daemon-chosen `g<n>` when the request named none; added within v1 S1); `{"chunks": 0}` for empty or whitespace-only text (nothing is queued, no event is sent) |
 | `pause` | `owner?` (added within v1 S1) | `{}` |
 | `resume` | `owner?` | `{}` |
-| `skip` | `owner?` | `{}` |
-| `back` | `owner?` | `{}` |
+| `skip` | `owner?`, `unit?` (`chunk`/`tag`, default `chunk`; added within v1 in 0.4.0, see [Tag navigation](#tag-navigation); earlier daemons ignore it) | `{}` |
+| `back` | `owner?`, `unit?` (as for `skip`) | `{}` |
 | `stop_reading` | `owner?` | `{}` |
 | `status` | none | status object (below) |
 | `idle` | `timeout`: duration string such as `"0"`, `"90s"`, `"10m"` | `{"idle_timeout_s": seconds}`: the timeout now in effect, an integer |
@@ -223,8 +223,8 @@ With `owner`, a command acts only on that owner's groups:
 |---|---|---|---|
 | `pause` | pause playback | mark the owner paused (its groups are passed over) | no-op |
 | `resume` | resume playback | unmark; its group waits for the next boundary | no-op |
-| `skip` | skip a chunk within its own groups | no-op | no-op |
-| `back` | back within its own history | no-op | no-op |
+| `skip` | skip a chunk (or tag run) within its own groups | no-op | no-op |
+| `back` | back within its own history (by chunk or tag run) | no-op | no-op |
 | `stop_reading` | stop its groups; the floor passes on at once | remove its queued groups | no-op |
 
 An owner's pause is a flag on the owner, not on a group. It lifts exactly when that owner has
@@ -317,6 +317,27 @@ of the new holder. `state` events come where the engine lifecycle changes.
   Per speak the sequence is `started? finished (started finished)*`.
 - A yield or a preempt does not repeat `tag_started`.
 - `status.tag`: the tag of the chunk playing, else of the floor group's next chunk, else `null`.
+
+### Tag navigation
+
+Added within v1 in 0.4.0: `skip` and `back` with `"unit":"tag"` move by a whole tag run (one
+tagged `speak`) instead of a chunk. Daemons before 0.4.0 ignore `unit` and move by a chunk, so
+clients gate on the `tag_nav` entry of `setup --check` `features` (`unit` is an argument, not a
+command, so it is not in `caps`); the CLI replaces an outdated idle daemon on `say`, `warm` and
+`watch`. The rules for owners are those of chunk-level `skip`/`back` (the owner must hold the
+floor).
+
+- `skip` with `tag`: every remaining chunk of the tag run at the head of the floor group is
+  dropped; its `tag_finished` has `skipped`. Audio generated ahead for what follows is kept, so
+  the next tag plays as soon as its first chunk is ready (usually at once). An untagged head
+  chunk is skipped alone.
+- `back` with `tag`: when a chunk of the current tag run has finished playing, the run restarts
+  from its first chunk; otherwise (its first chunk is playing or next) the run played before it
+  comes back. With nothing queued, the last played run comes back. Audio generated ahead is
+  kept; the chunks that come back from the history and the chunk that was playing are generated
+  again (played audio is not kept). Only the owner's `history` newest played chunks (setting,
+  default 20) can come back, so a longer run restarts partway. Events follow the `back` rules
+  above. An untagged head chunk makes it a chunk-level `back` that keeps the generated audio.
 
 ## `vxl watch`
 
