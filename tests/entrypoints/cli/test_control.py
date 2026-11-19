@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 
 from tests.entrypoints.cli.conftest import FakeWire
+from voxlektor.adapters.procs.lock_holder import LockHolder
+from voxlektor.bootstrap import client
+from voxlektor.bootstrap.client import ClientContext
+from voxlektor.contracts.protocol import PROTOCOL_VERSION
 from voxlektor.domain.errors import NotRunning, ServiceUnavailable
 from voxlektor.domain.settings import Settings
 from voxlektor.entrypoints import daemon
@@ -166,7 +170,7 @@ def test_status_error_reply_is_reported(wire: FakeWire) -> None:
 def test_status_json_when_not_running(wire: FakeWire, capsys: pytest.CaptureFixture[str]) -> None:
     wire.replies["status"] = NotRunning()
     assert main(["status", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"running": False}
+    assert json.loads(capsys.readouterr().out) == {"running": False, "protocol": 1}
 
 
 def test_status_json_is_the_daemon_status_plus_running(
@@ -176,7 +180,16 @@ def test_status_json_is_the_daemon_status_plus_running(
     assert main(["status", "--json"]) == 0
     out = capsys.readouterr().out
     assert out.count("\n") == 1  # one line, for tools
-    assert json.loads(out) == {"running": True, **STATUS}
+    assert json.loads(out) == {"running": True, "protocol": 1, **STATUS}
+
+
+def test_status_json_protocol_is_the_version_the_cli_speaks(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Tools gate on ``protocol``; a daemon that answered has replied in this version."""
+    wire.replies["status"] = {"ok": True, "data": STATUS}
+    assert main(["status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["protocol"] == PROTOCOL_VERSION == 1
 
 
 def test_status_json_of_an_unresponsive_daemon_exits_2_without_json(
@@ -185,6 +198,139 @@ def test_status_json_of_an_unresponsive_daemon_exits_2_without_json(
     wire.fail("status", "internal", "the service is shutting down")
     assert main(["status", "--json"]) == 2
     assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------- hung daemon (lock, no answer)
+
+HUNG = LockHolder(4242, verified=True)
+TIMEOUT = ServiceUnavailable("voxlektor did not answer within 5 s")
+
+
+def _hung(monkeypatch: pytest.MonkeyPatch, holder: LockHolder | None) -> list[float]:
+    graces: list[float] = []
+
+    def hung_daemon(self: ClientContext, grace_s: float = 0.0) -> LockHolder | None:
+        graces.append(grace_s)
+        return holder
+
+    monkeypatch.setattr(ClientContext, "hung_daemon", hung_daemon)
+    return graces
+
+
+def _stopped(monkeypatch: pytest.MonkeyPatch, outcome: str) -> list[LockHolder]:
+    stopped: list[LockHolder] = []
+
+    def stop_hung(self: ClientContext, holder: LockHolder) -> str:
+        stopped.append(holder)
+        return outcome
+
+    monkeypatch.setattr(ClientContext, "stop_hung", stop_hung)
+    return stopped
+
+
+@pytest.mark.parametrize("failure", [NotRunning(), TIMEOUT], ids=["no-socket", "timeout"])
+@pytest.mark.parametrize("holder", [HUNG, LockHolder(None, verified=False)], ids=["pid", "unknown"])
+def test_status_json_reports_a_lock_holder_that_does_not_answer(
+    wire: FakeWire,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    holder: LockHolder,
+) -> None:
+    wire.replies["status"] = failure
+    graces = _hung(monkeypatch, holder)
+    assert main(["status", "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown == {"running": True, "answering": False, "pid": holder.pid, "protocol": 1}
+    assert graces == [2.0]  # a daemon starting up or stopping gets 2 s before it counts as hung
+
+
+def test_status_json_of_an_unresponsive_daemon_without_the_lock_still_exits_2(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire.replies["status"] = TIMEOUT
+    _hung(monkeypatch, None)
+    assert main(["status", "--json"]) == 2
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("failure", [NotRunning(), TIMEOUT], ids=["no-socket", "timeout"])
+def test_status_of_a_hung_daemon_says_how_to_stop_it(
+    wire: FakeWire,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    wire.replies["status"] = failure
+    _hung(monkeypatch, HUNG)
+    assert main(["status"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == (
+        "a voxlektor daemon (pid 4242) holds the lock but does not answer; stop it with: vxl stop"
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("terminated", "stopped the daemon that did not answer (pid 4242): it exited on SIGTERM"),
+        (
+            "killed",
+            "stopped the daemon that did not answer (pid 4242): "
+            "SIGKILL after it ignored SIGTERM for 3 s",
+        ),
+        ("gone", "the daemon that did not answer (pid 4242) has exited"),
+    ],
+)
+@pytest.mark.parametrize("failure", [NotRunning(), TIMEOUT], ids=["no-socket", "timeout"])
+def test_stop_terminates_a_hung_daemon_and_says_what_it_did(
+    wire: FakeWire,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    case: tuple[str, str],
+) -> None:
+    outcome, shown = case
+    wire.replies["shutdown"] = failure
+    graces = _hung(monkeypatch, HUNG)
+    stopped = _stopped(monkeypatch, outcome)
+    assert main(["stop"]) == 0
+    assert capsys.readouterr().out.strip() == shown
+    assert stopped == [HUNG]
+    assert graces == [5.0]  # a daemon finishing an ordinary stop releases the lock meanwhile
+
+
+def test_stop_of_a_hung_daemon_that_survives_sigkill_exits_2(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire.replies["shutdown"] = NotRunning()
+    _hung(monkeypatch, HUNG)
+    _stopped(monkeypatch, "survived")
+    assert main(["stop"]) == 2
+    assert capsys.readouterr().err.strip() == (
+        "the daemon that did not answer (pid 4242) did not exit even after SIGKILL"
+    )
+
+
+def test_stop_never_signals_an_unverified_holder(
+    wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire.replies["shutdown"] = NotRunning()
+    _hung(monkeypatch, LockHolder(5151, verified=False))
+    signalled: list[int] = []
+
+    def terminate(pid: int, grace_s: float = 3.0) -> str:
+        signalled.append(pid)
+        return "killed"
+
+    monkeypatch.setattr(client, "terminate", terminate)
+    assert main(["stop"]) == 2
+    lock = home / "run" / "voxlektor.lock"
+    assert capsys.readouterr().err.strip() == (
+        f"pid 5151 holds {lock} but is not recognisably a voxlektor daemon; not stopping it"
+    )
+    assert signalled == []
 
 
 def test_serve_passes_the_idle_override(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:

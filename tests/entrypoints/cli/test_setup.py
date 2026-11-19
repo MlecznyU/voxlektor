@@ -6,7 +6,7 @@ import sys
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError
@@ -36,6 +36,12 @@ def _config(home: Path) -> Path:
 
 def _data(home: Path) -> dict[str, object]:
     return tomllib.loads(_config(home).read_text())
+
+
+def _default(data: dict[str, object]) -> dict[str, object]:
+    """The ``[profiles.default]`` table of a v2 config."""
+    profiles = cast(dict[str, dict[str, object]], data["profiles"])
+    return profiles["default"]
 
 
 class _Hub:
@@ -214,14 +220,11 @@ def test_flag_mode_end_to_end_with_the_hidden_fake_engine(
     assert main(argv) == 0
     data = _data(fresh_home)
     assert data == {
-        "config_version": 1,
+        "config_version": 2,
         "engine": "fake",
-        "voice": "f1-warm",
-        "base_lang": "en",
-        "rate": 1.5,
-        "volume": 70,
         "setup_completed": True,
         "service": {"idle_timeout": "1h", "autostart": True},
+        "profiles": {"default": {"voice": "f1-warm", "base_lang": "en", "rate": 1.5, "volume": 70}},
     }
     out = capsys.readouterr().out
     assert "volume = 70" in out
@@ -331,11 +334,244 @@ def test_flag_mode_rejects_invalid_values(
     assert not _config(fresh_home).exists()
 
 
+# ---------------------------------------------------------------- profiles, flag mode
+
+
+def test_profile_flag_mode_creates_the_profile_with_only_the_given_keys(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    argv = ["setup", "--yes", "--profile", "claude", "--voice", "m1-calm", "--rate", "1.0"]
+    argv += ["--lang", "en", "--steps", "8"]
+    assert main(argv) == 0
+    data = _data(fresh_home)
+    assert data == {
+        "config_version": 2,
+        "setup_completed": True,
+        "profiles": {"claude": {"voice": "m1-calm", "rate": 1.0, "lang": "en", "steps": 8}},
+    }
+    out = capsys.readouterr().out
+    assert "profile: claude" in out
+    assert "rate = 1.0" in out
+    assert f"config: {_config(fresh_home)}" in out
+    assert fresh_wire.cmds == []  # the daemon knows no profiles: nothing to restart
+    assert hub.downloads == []
+
+
+def test_profile_flag_mode_on_default_stores_only_the_key_and_restarts(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--profile", "default", "--rate", "1.2"]) == 0
+    data = _data(fresh_home)
+    assert _default(data) == {"rate": 1.2}
+    assert "service" not in data
+    assert fresh_wire.cmds == ["shutdown"]
+    assert main(["setup", "--yes", "--profile", "default", "--rate", "1.2"]) == 0
+    assert fresh_wire.cmds == ["shutdown"]  # unchanged: left alone
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--profile", "claude", "--engine", "fake"], "global"),
+        (["--profile", "claude", "--idle", "5m"], "global"),
+        (["--profile", "claude", "--no-autostart"], "global"),
+        (["--lang", "en"], "--profile"),
+        (["--steps", "8"], "--profile"),
+    ],
+)
+@pytest.mark.usefixtures("fresh_wire", "hub")
+def test_profile_options_are_checked(
+    fresh_home: Path,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    message: str,
+) -> None:
+    assert main(["setup", "--yes", *argv]) == 1
+    assert message in capsys.readouterr().err
+    assert not _config(fresh_home).exists()
+
+
+def test_profile_flag_mode_refuses_an_invalid_name(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--profile", "Claude"]) == 1
+    assert "invalid profile name 'Claude'" in capsys.readouterr().err
+    assert not _config(fresh_home).exists()
+
+
+def _json_lines(text: str) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in text.splitlines()]
+
+
+def test_progress_json_reports_the_download_then_done_on_stdout(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = ["setup", "--yes", "--profile", "claude", "--rate", "1.1"]
+    assert main([*argv, "--accept-model-license", "--progress", "json"]) == 0
+    captured = capsys.readouterr()
+    lines = _json_lines(captured.out)  # stdout carries JSON lines only
+    assert lines[-1] == {"event": "done"}
+    downloads = lines[:-1]
+    assert downloads
+    assert all(line["event"] == "download" for line in downloads)
+    assert downloads[-1]["done"] == downloads[-1]["total"] > 0
+    assert "profile: claude" in captured.err  # the summary moves to stderr
+    assert "downloading the model" not in captured.err
+    assert _data(fresh_home)["profiles"] == {"claude": {"rate": 1.1}}
+
+
+def test_progress_json_without_a_download_says_done(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--progress=json"]) == 0  # also without --profile
+    assert _json_lines(capsys.readouterr().out) == [{"event": "done"}]
+
+
+def test_progress_json_reports_errors(
+    fresh_wire: FakeWire,
+    fresh_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def offline(repo_id: str, **kwargs: object) -> str:
+        if kwargs.get("local_files_only"):
+            raise LocalEntryNotFoundError("not cached")
+        raise ConnectionError("offline")
+
+    monkeypatch.setattr(hf_cache, "snapshot_download", offline)
+    argv = ["setup", "--yes", "--profile", "claude", "--accept-model-license", "--progress=json"]
+    assert main(argv) == 2
+    lines = _json_lines(capsys.readouterr().out)
+    assert lines[-1]["event"] == "error"
+    assert "offline" in lines[-1]["message"]
+    assert not _config(fresh_home).exists()
+
+
+def test_progress_json_reports_invalid_values(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--profile", "claude", "--rate", "9", "--progress=json"]) == 1
+    assert _json_lines(capsys.readouterr().out) == [
+        {"event": "error", "message": "rate must be between 0.5 and 3.0"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--progress=json"],
+        ["--yes", "--progress=xml"],
+        ["--yes", "--progress=json", "--lang", "en"],  # --lang needs --profile
+        ["--yes", "--progress=json", "--profile", "claude", "--engine", "x"],
+    ],
+)
+def test_progress_option_is_checked_and_usage_errors_print_no_json(
+    fresh_wire: FakeWire,
+    hub: _Hub,
+    terminal: None,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+) -> None:
+    assert main(["setup", *argv]) == 1
+    assert capsys.readouterr().out == ""  # documented: the exit code is authoritative
+
+
+def test_json_progress_prints_a_line_per_percent_or_total_change(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    steps = [(0, 0), (5, 100), (5, 100), (6, 100), (55, 100), (55, 200), (200, 200)]
+    store = setup_cli._JsonProgress(FakeModelStore(steps=steps))  # pyright: ignore[reportPrivateUsage]
+    seen: list[tuple[int, int]] = []
+    assert store.is_present(FAKE_MODEL) is False
+    store.download(FAKE_MODEL, lambda done, total: seen.append((done, total)))
+    assert seen == steps  # everything is forwarded
+    assert [(line["done"], line["total"]) for line in _json_lines(capsys.readouterr().out)] == [
+        (5, 100),
+        (6, 100),
+        (55, 100),
+        (55, 200),
+        (200, 200),
+    ]
+
+
+# ---------------------------------------------------------------- profiles, interactive
+
+
+@pytest.mark.usefixtures("terminal")
+def test_interactive_profile_setup_asks_only_profile_keys(
+    fresh_wire: FakeWire,
+    fresh_home: Path,
+    hub: _Hub,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--volume", "40"]) == 0
+    fresh_wire.requests.clear()
+    capsys.readouterr()
+    prompter = _script(monkeypatch, ["f1-warm", True, ENTER, ":set", 1.3, True, ENTER])
+    assert main(["setup", "--profile", "claude"]) == 0
+    assert not any("Engine" in question for _, question, _ in prompter.asked)
+    assert prompter.asked[0][1].startswith("Voice (now v0-default, from default;")
+    data = _data(fresh_home)
+    assert cast(dict[str, object], data["profiles"])["claude"] == {"voice": "f1-warm", "rate": 1.3}
+    assert _default(data) == {"voice": "v0-default", "base_lang": "pl", "rate": 1.0, "volume": 40}
+    speaks = [req for req in fresh_wire.requests if req["cmd"] == "speak"]
+    assert [(req["voice"], req["rate"], req["volume"]) for req in speaks] == [
+        ("f1-warm", 1.0, 40),
+        ("f1-warm", 1.3, 40),
+    ]  # samples only: no test sentence after a profile run
+    assert "shutdown" not in fresh_wire.cmds  # a profile never reaches the daemon: no restart
+    captured = capsys.readouterr()
+    assert "profile: claude" in captured.out
+    assert "rate = 1.3" in captured.out
+    assert "stopped the running service" not in captured.err
+
+
+@pytest.mark.usefixtures("terminal")
+def test_interactive_profile_setup_stops_the_sample_daemon_without_autostart(
+    fresh_wire: FakeWire, hub: _Hub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--no-autostart"]) == 0
+    fresh_wire.requests.clear()
+    _script(monkeypatch, [])
+    assert main(["setup", "--profile", "claude"]) == 0
+    assert fresh_wire.cmds[-1] == "shutdown"  # the daemon started for the samples does not stay
+
+
+@pytest.mark.usefixtures("fresh_wire", "hub", "terminal")
+def test_interactive_profile_setup_needs_the_setup_first(
+    fresh_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    prompter = _script(monkeypatch, [])
+    assert main(["setup", "--profile", "claude"]) == 1
+    assert "vxl setup" in capsys.readouterr().err
+    assert prompter.asked == []
+    assert not _config(fresh_home).exists()
+
+
+def test_interactive_setup_of_the_default_profile_is_the_full_setup(
+    fresh_wire: FakeWire, hub: _Hub, terminal: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    prompter = _script(monkeypatch, [ENTER] * 9 + [False])
+    assert main(["setup", "--profile", "default"]) == 0
+    assert prompter.asked[0][1].startswith("Engine.")
+
+
 # ---------------------------------------------------------------- --check
 
 
-def _check(capsys: pytest.CaptureFixture[str]) -> tuple[int, dict[str, Any]]:
-    code = main(["setup", "--check"])
+def _check(capsys: pytest.CaptureFixture[str], *extra: str) -> tuple[int, dict[str, Any]]:
+    code = main(["setup", "--check", *extra])
     out = capsys.readouterr().out
     assert out.count("\n") == 1  # one JSON line, for tools
     return code, json.loads(out)
@@ -349,6 +585,7 @@ def test_check_before_setup_exits_1_and_reports_why(
     assert data["ready"] is False
     assert data["setup_completed"] is False
     assert data["version"] == voxlektor.__version__
+    assert data["protocol"] == 1  # tools gate on it; absent (older CLIs) means 1
     assert data["config_path"] == str(_config(fresh_home))
     assert data["engine"] == "omnivoice"
     assert data["model"] == {
@@ -370,7 +607,7 @@ def test_check_lists_features(
     fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _, data = _check(capsys)
-    assert data["features"] == ["owners", "tags", "warm", "watch"]
+    assert data["features"] == ["owners", "profiles", "steps", "tags", "warm", "watch"]
     assert data["features"] == sorted(data["features"])
     assert list(setup_cli.FEATURES) == data["features"]
     assert fresh_wire.requests == []  # readable without a daemon
@@ -393,6 +630,7 @@ def test_check_after_setup_with_the_model_present_exits_0(
         "base_lang": "pl",
         "rate": 1.0,
         "volume": 70,
+        "steps": 12,
         "idle_timeout_s": 600,
         "autostart": True,
     }
@@ -436,7 +674,104 @@ def test_check_tolerates_an_invalid_config_value(
     assert "ignoring invalid" in captured.err
 
 
-@pytest.mark.parametrize("extra", [["--yes"], ["--volume", "70"], ["--accept-model-license"]])
+def test_check_reports_the_default_profile_without_profile(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, data = _check(capsys)
+    assert data["profile"] == "default"
+    assert data["profile_exists"] is True
+
+
+def test_check_profile_reports_its_effective_settings(
+    fresh_wire: FakeWire, fresh_home: Path, hub: _Hub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    _config(fresh_home).parent.mkdir(parents=True)
+    _config(fresh_home).write_text(
+        "config_version = 2\nsetup_completed = true\n[service]\nautostart = false\n"
+        '[profiles.default]\nvoice = "f1-warm"\nvolume = 40\n'
+        '[profiles.claude]\nrate = 1.1\nlang = "en"\nvolume = 500\n'
+    )
+    code = main(["setup", "--check", "--profile", "claude"])
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert code == 0
+    assert data["ready"] is True
+    assert data["profile"] == "claude"
+    assert data["profile_exists"] is True
+    assert data["settings"] == {
+        "voice": "f1-warm",  # from default
+        "lang": "en",  # from the profile
+        "base_lang": "pl",  # built-in
+        "rate": 1.1,
+        "volume": 40,  # the profile's 500 is invalid: skipped, default's value
+        "steps": 12,
+        "idle_timeout_s": 600,
+        "autostart": False,  # global
+    }
+    assert "ignoring invalid volume in profile 'claude'" in captured.err
+    assert "profiles" in data["features"]
+
+
+def test_check_profile_lets_the_environment_override_only_what_it_does_not_set(
+    fresh_wire: FakeWire,
+    fresh_home: Path,
+    hub: _Hub,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _config(fresh_home).parent.mkdir(parents=True)
+    _config(fresh_home).write_text(
+        "[profiles.default]\nbase_lang = 'pl'\n[profiles.claude]\nrate = 1.1\nsteps = 8\n"
+    )
+    monkeypatch.setenv("VOXLEKTOR_RATE", "2.0")  # the profile sets rate: it wins
+    monkeypatch.setenv("VOXLEKTOR_BASE_LANG", "en")  # inherited from default: the env wins
+    monkeypatch.setenv("VOXLEKTOR_VOLUME", "500")  # invalid: skipped
+    code = main(["setup", "--check", "--profile", "claude"])
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert code == 1  # setup has not completed
+    assert (data["settings"]["rate"], data["settings"]["steps"]) == (1.1, 8)
+    assert data["settings"]["base_lang"] == "en"
+    assert data["settings"]["volume"] == 50
+    assert captured.err.count("ignoring invalid VOXLEKTOR_VOLUME") == 1  # one shared resolver
+
+
+def test_check_profile_survives_an_unreadable_environment(
+    fresh_wire: FakeWire,
+    fresh_home: Path,
+    hub: _Hub,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _config(fresh_home).parent.mkdir(parents=True)
+    _config(fresh_home).write_text("[profiles.claude]\nrate = 1.1\n")
+    monkeypatch.setenv("VOXLEKTOR_RATE", "fast")
+    _, data = _check(capsys, "--profile", "claude")
+    assert data["settings"]["rate"] == 1.1
+    assert data["profile_exists"] is True
+
+
+@pytest.mark.parametrize("name", ["ghost", "Not Valid"])
+def test_check_of_an_unknown_profile_is_not_ready(
+    fresh_wire: FakeWire, hub: _Hub, capsys: pytest.CaptureFixture[str], name: str
+) -> None:
+    hub.cached.add("mlx-community/OmniVoice-bf16")
+    assert main(["setup", "--yes", "--volume", "70"]) == 0
+    capsys.readouterr()
+    code, data = _check(capsys, "--profile", name)
+    assert code == 1
+    assert data["ready"] is False
+    assert data["setup_completed"] is True
+    assert data["profile"] == name
+    assert data["profile_exists"] is False
+    assert data["settings"]["volume"] == 70  # what it would inherit: default's
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [["--yes"], ["--volume", "70"], ["--accept-model-license"], ["--progress", "json"]],
+)
 def test_check_combined_with_other_options_exits_1(
     fresh_wire: FakeWire, hub: _Hub, extra: list[str]
 ) -> None:
@@ -501,8 +836,8 @@ def test_interactive_setup_end_to_end(
     assert hub.downloads == ["mlx-community/OmniVoice-bf16"]
     assert "downloading the model: 100%" in prompter.said
     data = _data(fresh_home)
-    assert data["voice"] == "f1-warm"
-    assert data["volume"] == 60
+    assert _default(data)["voice"] == "f1-warm"
+    assert _default(data)["volume"] == 60
     assert data["setup_completed"] is True
     speaks = [req for req in fresh_wire.requests if req["cmd"] == "speak"]
     # samples: voice, rate, volume; then the test sentence after the restart
@@ -555,7 +890,8 @@ def test_flag_mode_repairs_invalid_config_values(
     assert "ignoring invalid rate in config.toml: rate must be between 0.5 and 3.0" in err
     assert "ignoring invalid idle_timeout in config.toml: invalid duration 'soon'" in err
     data = _data(fresh_home)
-    assert (data["rate"], data["volume"]) == (1.0, 30)  # the default, and the valid value kept
+    default = _default(data)
+    assert (default["rate"], default["volume"]) == (1.0, 30)  # the default; the valid one kept
     assert data["service"] == {"idle_timeout": "10m", "autostart": True}
     assert data["setup_completed"] is True
 
@@ -574,7 +910,7 @@ def test_interactive_setup_starts_despite_an_invalid_env_value(
     assert main(["setup"]) == 0
     err = capsys.readouterr().err
     assert "ignoring invalid VOXLEKTOR_VOLUME in the environment: " in err
-    assert _data(fresh_home)["volume"] == 50
+    assert _default(_data(fresh_home))["volume"] == 50
 
 
 @pytest.mark.usefixtures("terminal")

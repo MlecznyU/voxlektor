@@ -1,12 +1,15 @@
 """Reading policy: how text becomes chunks and how far generation runs ahead of playback."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
+from typing import Literal
 
 from voxlektor.domain.text import limits
-from voxlektor.domain.text.chunking import split_text
+from voxlektor.domain.text.chunking import split_paragraphs, split_text
 from voxlektor.domain.text.lang import detect_lang
 from voxlektor.domain.types import ChunkId, Epoch, Lang, LangPref
+
+type _Ends = Literal["sentence", "paragraph"]
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,9 @@ class Chunk:
     rate: float
     epoch: Epoch
     volume: int = 50  # 0..100, 50 = the even level; last, so positional construction is unchanged
+    _: KW_ONLY
+    ends: Literal["sentence", "paragraph"] = "sentence"  # how the text goes on after this chunk
+    steps: int | None = None  # diffusion steps for the engine; None = the engine's default
 
 
 class AheadWindow:
@@ -42,50 +48,27 @@ class UnderrunTracker:
             self.count += 1
 
 
-def _merge_same_language(pieces: list[tuple[str, Lang]]) -> list[tuple[str, Lang]]:
-    """Merge adjacent short chunks of the same language (the split_text rule, per language)."""
-    merged: list[tuple[str, Lang]] = []
-    for text, lang in pieces:
-        if merged:
-            previous, previous_lang = merged[-1]
-            if (
-                previous_lang == lang
-                and len(previous) < limits.MERGE_BELOW
-                and len(previous) + 1 + len(text) <= limits.MAX_CHARS
-            ):
-                merged[-1] = (f"{previous} {text}", lang)
-                continue
-        merged.append((text, lang))
-    return merged
-
-
 def _speakable(text: str) -> bool:
     """True when ``text`` has at least one letter or digit (punctuation alone is not read)."""
     return any(ch.isalnum() for ch in text)
 
 
-def _attach_unspeakable(planned: list[tuple[str, Lang]]) -> list[tuple[str, Lang]]:
-    """Fold every chunk without a letter or digit into a neighbour, taking its language.
+def _plan_paragraph(paragraph: str, lang: LangPref, base_lang: Lang) -> list[tuple[str, Lang]]:
+    """Split one paragraph into chunks; with ``lang == "auto"`` each is detected on its own.
 
-    It joins the chunk before it when the result fits ``MAX_CHARS``, else the chunk after it;
-    when neither fits (or it has no neighbour) it is dropped, as there is nothing to read.
+    ``split_text`` packs a paragraph greedily, so no two neighbours fit ``MAX_CHARS`` together
+    and nothing is left to merge; a chunk without a letter or digit (a hard-cut run of
+    punctuation) has nothing to read and is dropped.
     """
-    result: list[tuple[str, Lang]] = []
-    carry = ""  # unspeakable text waiting for the next speakable chunk
-    for text, lang in planned:
-        if _speakable(text):
-            joined = f"{carry} {text}"
-            result.append((joined if carry and len(joined) <= limits.MAX_CHARS else text, lang))
-            carry = ""
-        elif result and len(result[-1][0]) + 1 + len(text) <= limits.MAX_CHARS:
-            result[-1] = (f"{result[-1][0]} {text}", result[-1][1])
-        else:
-            carry = f"{carry} {text}" if carry else text
-    return result
+    if lang == "auto":
+        pieces = split_text(paragraph, merge_below=0)
+        return [(t, detect_lang(t, base_lang)) for t in pieces if _speakable(t)]
+    forced: Lang = lang
+    return [(t, forced) for t in split_text(paragraph) if _speakable(t)]
 
 
-def _balanced_split(text: str) -> tuple[str, str] | None:
-    """Split ``text`` on a space into a head of at most ``FIRST_MAX_CHARS`` and a rest, both at
+def _balanced_split(text: str, max_chars: int) -> tuple[str, str] | None:
+    """Split ``text`` on a space into a head of at most ``max_chars`` and a rest, both at
     least ``MERGE_BELOW`` long and speakable; prefer a sentence end, then the longest head.
     """
     words = text.split(" ")
@@ -93,7 +76,7 @@ def _balanced_split(text: str) -> tuple[str, str] | None:
     for k in range(1, len(words)):
         head, rest = " ".join(words[:k]), " ".join(words[k:])
         if (
-            limits.MERGE_BELOW <= len(head) <= limits.FIRST_MAX_CHARS
+            limits.MERGE_BELOW <= len(head) <= max_chars
             and len(rest) >= limits.MERGE_BELOW
             and _speakable(head)
             and _speakable(rest)
@@ -104,36 +87,41 @@ def _balanced_split(text: str) -> tuple[str, str] | None:
     return None if best is None else (best[1], best[2])
 
 
-def _cap_first(planned: list[tuple[str, Lang]]) -> list[tuple[str, Lang]]:
-    """Cut the first chunk down to its first piece of at most ``FIRST_MAX_CHARS``.
+def _cap(
+    planned: list[tuple[str, Lang, _Ends]], index: int, max_chars: int
+) -> list[tuple[str, Lang, _Ends]]:
+    """Cut the chunk at ``index`` down to its first piece of at most ``max_chars``.
 
-    The rest of it joins the next chunk when both share a language and fit ``MAX_CHARS``.
-    Otherwise it is a chunk of its own, so it must be at least ``MERGE_BELOW`` long and
-    speakable: if the plain cut leaves less, the split point moves earlier
-    (``_balanced_split``), and if no such split exists the first chunk is left whole.
-    Later chunks are unchanged.
+    The rest of it joins the next chunk when that one is in the same paragraph, shares the
+    language and both fit ``MAX_CHARS``. Otherwise it is a chunk of its own (keeping how the
+    original chunk ended), so it must be at least ``MERGE_BELOW`` long and speakable: if the
+    plain cut leaves less, the split point moves earlier (``_balanced_split``), and if no such
+    split exists the chunk is left whole. Other chunks are unchanged.
     """
-    if not planned or len(planned[0][0]) <= limits.FIRST_MAX_CHARS:
+    if index >= len(planned) or len(planned[index][0]) <= max_chars:
         return planned
-    (first, lang), *later = planned
+    before, (text, lang, ends), later = planned[:index], planned[index], planned[index + 1 :]
 
     def joins_next(rest: str) -> bool:
+        # A chunk ending a sentence is never the last one, so ``later`` is not empty here.
         return (
-            bool(later)
+            ends == "sentence"
             and later[0][1] == lang
-            and len(rest) + 1 + len(later[0][0]) <= (limits.MAX_CHARS)
+            and len(rest) + 1 + len(later[0][0]) <= limits.MAX_CHARS
         )
 
-    head, *tail = split_text(first, max_chars=limits.FIRST_MAX_CHARS, merge_below=0)
+    head, *tail = split_text(text, max_chars=max_chars, merge_below=0)
     rest = " ".join(tail)
     if _speakable(head) and joins_next(rest):
-        return [(head, lang), (f"{rest} {later[0][0]}", lang), *later[1:]]
+        nxt_text, _, nxt_ends = later[0]
+        joined = (f"{rest} {nxt_text}", lang, nxt_ends)
+        return [*before, (head, lang, "sentence"), joined, *later[1:]]
     if not (_speakable(head) and _speakable(rest) and len(rest) >= limits.MERGE_BELOW):
-        balanced = _balanced_split(first)
+        balanced = _balanced_split(text, max_chars)
         if balanced is None:
             return planned
         head, rest = balanced
-    return [(head, lang), (rest, lang), *later]
+    return [*before, (head, lang, "sentence"), (rest, lang, ends), *later]
 
 
 def plan_reading(  # noqa: PLR0913, PLR0917  # frozen signature (plan Task 6, ruling R19)
@@ -145,27 +133,42 @@ def plan_reading(  # noqa: PLR0913, PLR0917  # frozen signature (plan Task 6, ru
     first_id: int,
     *,
     volume: int = 50,
+    steps: int | None = None,
+    cap_start: bool = True,
 ) -> list[Chunk]:
     """Split ``text`` into chunks with consecutive ids starting at ``first_id``.
 
-    With ``lang == "auto"`` every chunk is detected on its own (ties go to ``base_lang``)
-    and short neighbours are merged only when they share a language. Every chunk carries
-    ``rate``, ``epoch`` and ``volume``. A chunk without any letter or digit is folded into a
-    neighbour (``_attach_unspeakable``). The first chunk is then capped to ``FIRST_MAX_CHARS``
-    (its first sentences, or a long first sentence split on spaces) so that the first audio is
-    ready sooner, never leaving a tiny remainder; see ``_cap_first``.
+    Paragraphs (blank lines) are planned on their own and never merged: the last chunk of
+    each is marked ``ends="paragraph"`` (so also the last chunk of the speak), the others
+    ``"sentence"``. With ``lang == "auto"`` every chunk is detected on its own (ties go to
+    ``base_lang``). A chunk without any letter or digit is dropped. Every chunk carries
+    ``rate``, ``epoch``, ``volume`` and ``steps``.
+
+    With ``cap_start`` (a reading that starts from idle) the first chunk is capped to
+    ``FIRST_MAX_CHARS`` and then the second to ``SECOND_MAX_CHARS`` (their first sentences, or
+    a long sentence split on spaces) so that the first audio is ready sooner and the second is
+    ready before the first has played, never leaving a tiny remainder; see ``_cap``.
     """
-    planned: list[tuple[str, Lang]]
-    if lang == "auto":
-        pieces: list[tuple[str, Lang]] = [
-            (t, detect_lang(t, base_lang)) for t in split_text(text, merge_below=0)
-        ]
-        planned = _merge_same_language(pieces)
-    else:
-        forced: Lang = lang
-        planned = [(t, forced) for t in split_text(text)]
-    planned = _cap_first(_attach_unspeakable(planned))
+    planned: list[tuple[str, Lang, _Ends]] = []
+    for paragraph in split_paragraphs(text):
+        chunks = _plan_paragraph(paragraph, lang, base_lang)
+        last = len(chunks) - 1
+        planned.extend(
+            (t, chunk_lang, "paragraph" if i == last else "sentence")
+            for i, (t, chunk_lang) in enumerate(chunks)
+        )
+    if cap_start:
+        planned = _cap(_cap(planned, 0, limits.FIRST_MAX_CHARS), 1, limits.SECOND_MAX_CHARS)
     return [
-        Chunk(ChunkId(first_id + i), t, chunk_lang, rate, epoch, volume)
-        for i, (t, chunk_lang) in enumerate(planned)
+        Chunk(
+            ChunkId(first_id + i),
+            t,
+            chunk_lang,
+            rate,
+            epoch,
+            volume,
+            ends=ends,
+            steps=steps,
+        )
+        for i, (t, chunk_lang, ends) in enumerate(planned)
     ]

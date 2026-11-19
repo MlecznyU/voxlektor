@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from voxlektor.adapters.audio.memory_out import MemoryCuePlayer, MemoryOutput
@@ -25,7 +26,15 @@ from voxlektor.app.commands import (
     StopReading,
     Unload,
 )
-from voxlektor.app.effects import CancelWake, Cue, Effect, Emit, ScheduleWake, UnloadEngine
+from voxlektor.app.effects import (
+    CancelWake,
+    Cue,
+    Effect,
+    Emit,
+    ScheduleWake,
+    StartPlayback,
+    UnloadEngine,
+)
 from voxlektor.app.session import Session
 from voxlektor.app.voices import VoiceCatalog
 from voxlektor.contracts.engine import AudioChunk, Engine, VoicePrompt, VoiceRef
@@ -257,6 +266,20 @@ def test_three_chunk_speak_plays_three_chunks_and_ends_idle() -> None:
 
 
 @pytest.mark.usefixtures("no_leaked_threads")
+def test_start_playback_passes_its_lead_to_the_output() -> None:
+    rig = _rig(auto_complete=False)
+
+    async def scenario(rig: _Rig) -> None:
+        rig.buffers.put(ChunkId(7), AudioChunk(np.zeros(8, dtype=np.float32), 24000))
+        effects: list[Effect] = [StartPlayback(ChunkId(7), lead_s=0.8)]
+        rig.core.execute(effects)
+        assert rig.output.started == [ChunkId(7)]
+        assert rig.output.leads == [0.8]
+
+    _run(rig, scenario)
+
+
+@pytest.mark.usefixtures("no_leaked_threads")
 def test_buffers_stay_within_the_ahead_window_for_a_long_reading() -> None:
     """Review Focus 3, threaded: the window fills to ahead (2) and never goes beyond it.
 
@@ -477,10 +500,18 @@ class _GatedEngine(FakeEngine):
         self.entered = threading.Event()
         self.gate = threading.Event()
 
-    def synthesize(self, text: str, lang: str, prompt: VoicePrompt) -> Iterator[AudioChunk]:
+    def synthesize(
+        self,
+        text: str,
+        lang: str,
+        prompt: VoicePrompt,
+        *,
+        rate: float = 1.0,
+        steps: int | None = None,
+    ) -> Iterator[AudioChunk]:
         self.entered.set()
         assert self.gate.wait(TIMEOUT)
-        return super().synthesize(text, lang, prompt)
+        return super().synthesize(text, lang, prompt, rate=rate, steps=steps)
 
 
 def _texts(engine: FakeEngine) -> list[str]:
@@ -546,11 +577,13 @@ def test_an_output_whose_start_fails_is_a_playback_failure() -> None:
             super().__init__(auto_complete=True)
             self.failures = 1
 
-        def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
+        def start(
+            self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+        ) -> None:
             if self.failures:
                 self.failures -= 1
                 raise RuntimeError("no device")
-            super().start(chunk, samples, sample_rate)
+            super().start(chunk, samples, sample_rate, lead_s=lead_s)
 
     rig = _rig(output=_FailsOnce())
 

@@ -33,11 +33,15 @@ class Item:
 
 @dataclass
 class Group:
-    """One group's reading state: its epoch, its age and its unplayed chunks in order."""
+    """One group's reading state: its epoch, its age and its unplayed chunks in order.
+
+    ``auto`` marks an automatic group (``g1``, ``g2``, ...: a ``speak`` without a group).
+    """
 
     epoch: Epoch
     age: float
     chunks: deque[ChunkId] = field(default_factory=deque[ChunkId])  # [0] is the head
+    auto: bool = False
 
 
 @dataclass

@@ -27,6 +27,14 @@ def test_auto_complete_calls_on_done_synchronously() -> None:
     assert done == [ChunkId(1)]
 
 
+def test_start_records_the_lead_of_every_chunk() -> None:
+    out, _, _ = _wired(auto_complete=False)
+    out.start(ChunkId(1), object(), 24000)
+    out.start(ChunkId(2), object(), 24000, lead_s=0.5)
+    assert out.started == [ChunkId(1), ChunkId(2)]
+    assert out.leads == [0.0, 0.5]
+
+
 def test_manual_complete_and_fail() -> None:
     out, done, failed = _wired(auto_complete=False)
     out.start(ChunkId(1), object(), 24000)

@@ -48,6 +48,27 @@ BENCH_PARAGRAPHS_EN: tuple[str, ...] = (
     "I'd go with the second. Which way do you want to go?",
 )
 
+# A five-paragraph Polish code-review reply with English terms (1220 characters);
+# scripts/bench_latency.py reads it one speak per paragraph, as dialogue-box does.
+LATENCY_REPLY_PL: tuple[str, ...] = (
+    "Przejrzałem twój pull request i ogólnie wygląda dobrze. Zmiany w daemonie są spójne z "
+    "architekturą, a testy przechodzą bez błędów. Mam jednak kilka uwag, które warto poprawić "
+    "przed scaleniem.",
+    "Po pierwsze, w module dialogue-box kolejkujesz każdy akapit osobno, ale nie obsługujesz "
+    "sytuacji, w której daemon zwróci błąd w połowie odpowiedzi. Wtedy użytkownik usłyszy tylko "
+    "część tekstu i nie dostanie żadnego komunikatu. Proponuję dodać prosty retry oraz czytelny "
+    "log.",
+    "Po drugie, nowe API do statusu zwraca pole z czasem w milisekundach, a reszta protokołu "
+    "używa sekund. To drobiazg, ale łatwo o pomyłkę po stronie klienta. Lepiej trzymać jedną "
+    "jednostkę w całym kontrakcie.",
+    "Po trzecie, pokrycie testami spadło w warstwie app poniżej wymaganego progu. Brakuje testu "
+    "dla ścieżki, w której sesja dostaje polecenie stop w trakcie generowania. Symulator "
+    "powinien to łatwo odtworzyć, bez wątków i bez opóźnień. Dopisz jeden przypadek, a gate "
+    "znowu będzie zielony.",
+    "Poza tym nie widzę większych problemów. Jeśli poprawisz te trzy rzeczy, chętnie zatwierdzę "
+    "zmiany. Daj znać, gdybyś chciał, żebym przejrzał kod jeszcze raz po aktualizacji.",
+)
+
 # Short paragraphs for plan_reading: one PL then one EN, and two PL ones.
 MIXED_PL_EN = "Zażółć gęślą jaźń.\n\nHello world, this is English."
 TWO_SHORT_PL = "Zażółć gęślą jaźń.\n\nWłaśnie sprawdziłem wszystkie testy."

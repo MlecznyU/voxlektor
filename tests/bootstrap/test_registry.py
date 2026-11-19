@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import subprocess
 import sys
@@ -6,6 +7,7 @@ import pytest
 
 from voxlektor.bootstrap import environment, registry
 from voxlektor.bootstrap.registry import engine_models, load_engine
+from voxlektor.contracts.engine import ENGINE_API
 from voxlektor.domain.errors import DomainError
 from voxlektor.testing.fakes import FAKE_MODEL, FakeEngine
 
@@ -65,6 +67,38 @@ def test_engine_models_rejects_a_foreign_object(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(registry, "entry_points", fake_entry_points)
     with pytest.raises(TypeError, match="'odd'"):
         engine_models()
+
+
+def test_load_engine_rejects_an_engine_of_an_older_engine_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _OldEngine(FakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.spec = dataclasses.replace(self.spec, api=1)  # written for the v1 SPI
+
+    class _Point:
+        name = "old"
+
+        def load(self) -> type[_OldEngine]:
+            return _OldEngine
+
+    def fake_entry_points(group: str) -> list[_Point]:
+        return [_Point()]
+
+    monkeypatch.setattr(registry, "entry_points", fake_entry_points)
+    with pytest.raises(DomainError) as info:
+        load_engine("old")
+    assert info.value.code == "unsupported"
+    assert info.value.message == (
+        f"engine 'old' implements Engine API 1; this voxlektor needs Engine API {ENGINE_API} "
+        "(synthesize takes rate and steps); update the engine"
+    )
+
+
+def test_registered_engines_declare_the_current_engine_api() -> None:
+    assert ENGINE_API == 2
+    assert load_engine("fake").spec.api == ENGINE_API
 
 
 def test_load_engine_sets_the_hub_environment(monkeypatch: pytest.MonkeyPatch) -> None:

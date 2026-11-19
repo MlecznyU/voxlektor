@@ -183,6 +183,118 @@ def test_worker_applies_level_after_stretch(
     assert np.all(audio.samples == 0.25)
 
 
+def _run_one(worker: EngineWorker, chunk: Chunk) -> AudioChunk:
+    rec = _Recorder()
+    for label, job in [("load", LOAD), ("prepare", PREPARE), ("gen", Generate(chunk, "v1"))]:
+        rec.submit(worker, label, job)
+    *_, (label, _, result) = rec.take(3)
+    assert label == "gen", result
+    assert isinstance(result, tuple)
+    return result[0]
+
+
+def _chunk(rate: float, steps: int | None = None, text: str = "x" * 30) -> Chunk:
+    return Chunk(ChunkId(0), text, "en", rate, Epoch(0), steps=steps)
+
+
+@pytest.mark.parametrize("rate", [0.75, 1.0, 1.25, 1.5])
+def test_a_rate_engine_speaks_in_band_rates_itself_without_a_stretch(
+    repo: InMemoryVoiceRepository, rate: float
+) -> None:
+    provider = _Provider(lambda: FakeEngine(native_rate=True))
+    stretch = _Stretch()
+    worker = EngineWorker(provider, repo, stretch)
+    try:
+        audio = _run_one(worker, _chunk(rate, steps=8))
+    finally:
+        worker.close()
+    assert provider.engines[0].synth_options == [(rate, 8)]
+    assert stretch.rates == []
+    assert len(audio.samples) == round(36000 / rate)
+
+
+@pytest.mark.parametrize("rate", [0.5, 0.7, 1.6, 2.0])
+def test_a_rate_engine_outside_the_band_runs_at_one_and_is_stretched(
+    repo: InMemoryVoiceRepository, rate: float
+) -> None:
+    provider = _Provider(lambda: FakeEngine(native_rate=True))
+    stretch = _Stretch()
+    worker = EngineWorker(provider, repo, stretch)
+    try:
+        _run_one(worker, _chunk(rate, steps=12))
+    finally:
+        worker.close()
+    assert provider.engines[0].synth_options == [(1.0, 12)]
+    assert stretch.rates == [rate]
+
+
+def test_an_engine_without_rate_gets_rate_one_and_is_stretched(
+    worker: EngineWorker, provider: _Provider, stretch: _Stretch
+) -> None:
+    _run_one(worker, _chunk(1.25))
+    assert provider.engines[0].synth_options == [(1.0, None)]
+    assert stretch.rates == [1.25]
+
+
+class _Edge:
+    """Records calls into a shared log; ``cut`` drops that many samples from each end."""
+
+    def __init__(self, name: str, log: list[tuple[str, int]], cut: int = 0) -> None:
+        self.name = name
+        self.log = log
+        self.cut = cut
+
+    def __call__(self, samples: Samples, sample_rate: int) -> Samples:
+        assert sample_rate == 24000
+        self.log.append((self.name, len(samples)))
+        return samples[self.cut : len(samples) - self.cut]
+
+
+def test_trim_runs_before_the_stretch_and_fade_after_it_then_level(
+    provider: _Provider, repo: InMemoryVoiceRepository
+) -> None:
+    log: list[tuple[str, int]] = []
+
+    def stretch(samples: Samples, rate: float) -> Samples:
+        log.append(("stretch", len(samples)))
+        return samples[: len(samples) // 2]
+
+    def level(samples: Samples, sample_rate: int, volume: int) -> Samples:
+        log.append(("level", len(samples)))
+        return samples
+
+    worker = EngineWorker(
+        provider,
+        repo,
+        stretch,
+        level=level,
+        trim=_Edge("trim", log, cut=1000),
+        fade=_Edge("fade", log),
+    )
+    try:
+        audio = _run_one(worker, _chunk(2.0))
+    finally:
+        worker.close()
+    assert log == [("trim", 36000), ("stretch", 34000), ("fade", 17000), ("level", 17000)]
+    assert len(audio.samples) == 17000
+
+
+def test_trim_and_fade_apply_to_native_rate_audio_too(
+    repo: InMemoryVoiceRepository,
+) -> None:
+    log: list[tuple[str, int]] = []
+    provider = _Provider(lambda: FakeEngine(native_rate=True))
+    worker = EngineWorker(
+        provider, repo, _Stretch(), trim=_Edge("trim", log, cut=500), fade=_Edge("fade", log)
+    )
+    try:
+        audio = _run_one(worker, _chunk(1.5))
+    finally:
+        worker.close()
+    assert log == [("trim", 24000), ("fade", 23000)]
+    assert len(audio.samples) == 23000
+
+
 def test_worker_without_level_keeps_the_stretched_samples(
     worker: EngineWorker,
 ) -> None:
@@ -204,10 +316,18 @@ class _GatedEngine(FakeEngine):
         self.entered = threading.Event()
         self.gate = threading.Event()
 
-    def synthesize(self, text: str, lang: str, prompt: VoicePrompt) -> Iterator[AudioChunk]:
+    def synthesize(
+        self,
+        text: str,
+        lang: str,
+        prompt: VoicePrompt,
+        *,
+        rate: float = 1.0,
+        steps: int | None = None,
+    ) -> Iterator[AudioChunk]:
         self.entered.set()
         assert self.gate.wait(TIMEOUT)
-        return super().synthesize(text, lang, prompt)
+        return super().synthesize(text, lang, prompt, rate=rate, steps=steps)
 
 
 def test_queued_generates_of_a_cancelled_epoch_are_skipped_silently(

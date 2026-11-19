@@ -1,11 +1,12 @@
 """``vxl config voice NAME`` (validated against the local catalog) and ``vxl config show``."""
 
+import sys
 from typing import Annotated
 
 import tomli_w
 import typer
 
-from voxlektor.bootstrap.client import build_client
+from voxlektor.bootstrap.client import build_client, build_tolerant_client
 from voxlektor.entrypoints.cli.output import EXIT_OK
 
 config_app = typer.Typer(help="Show or change the configuration.", no_args_is_help=True)
@@ -22,10 +23,19 @@ def voice(name: Annotated[str, typer.Argument(metavar="NAME", help="A voice name
 
 
 @config_app.command("show")
-def show() -> int:
-    """Show the effective settings (env > config file > defaults) in the config.toml layout."""
-    ctx = build_client({})
-    s = ctx.settings
+def show(
+    profile: Annotated[
+        str | None,
+        typer.Option("--profile", metavar="NAME", help="Show this profile's effective settings."),
+    ] = None,
+) -> int:
+    """Show the effective settings (profile > env > default > built-ins) in a config.toml layout.
+
+    An invalid value is reported on stderr and skipped (``build_tolerant_client``); an unknown
+    or invalid profile name is a user error (exit 1).
+    """
+    ctx, profiles = build_tolerant_client(_warn)
+    s, _ = profiles.resolve_known(profile)
     effective = {
         "engine": str(s.engine),
         "voice": str(s.voice),
@@ -33,12 +43,18 @@ def show() -> int:
         "base_lang": s.base_lang,
         "rate": s.rate,
         "volume": s.volume,
+        "steps": s.steps,
         "history": s.history,
         "service": {"idle_timeout": _toml_duration(s.idle_timeout_s), "autostart": s.autostart},
     }
-    print(f"# effective settings; file: {ctx.config_path}")
+    of = "" if profile is None else f" of profile {profile}"
+    print(f"# effective settings{of}; file: {ctx.config_path}")
     print(tomli_w.dumps(effective), end="")
     return EXIT_OK
+
+
+def _warn(message: str) -> None:
+    print(message, file=sys.stderr)
 
 
 def _toml_duration(seconds: int) -> str:

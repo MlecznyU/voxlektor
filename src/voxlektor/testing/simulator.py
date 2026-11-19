@@ -19,7 +19,8 @@ The simulator also checks the Session: ``SimulationError`` is raised when
 
 It records what tests need to check the rest: every effect, the cues played, the epoch of each
 started chunk, the Session state at each ``Generate`` and every engine failure together with
-the Session's answer (``failure_replies``).
+the Session's answer (``failure_replies``). The ``lead_s`` of every ``StartPlayback`` is handed
+to the output (``MemoryOutput.leads`` records it).
 """
 
 from collections import deque
@@ -217,8 +218,8 @@ class Simulator:
                 self._submit_generate(effect, chunk)
             case CancelGeneration(epochs):
                 self._cancel(set(epochs))
-            case StartPlayback(chunk):
-                self._start(chunk)
+            case StartPlayback(chunk, lead_s):
+                self._start(chunk, lead_s)
             case PausePlayback() | ResumePlayback() | AbortPlayback():
                 self._control_output(effect)
             case DropAudio(chunks):
@@ -273,7 +274,7 @@ class Simulator:
         self.chunks[chunk.id] = chunk
         self._jobs.append(effect)
 
-    def _start(self, chunk: ChunkId) -> None:
+    def _start(self, chunk: ChunkId, lead_s: float) -> None:
         if self.playing is not None:
             raise SimulationError(f"chunk {chunk} started while {self.playing} is already playing")
         if self.output.paused:
@@ -283,7 +284,7 @@ class Simulator:
             raise SimulationError(f"chunk {chunk} started with no audio")
         self.playing = chunk
         self.started.append((chunk, self._audio_epoch.pop(chunk)))
-        self.output.start(chunk, audio.samples, audio.sample_rate)
+        self.output.start(chunk, audio.samples, audio.sample_rate, lead_s=lead_s)
 
     def _run_job(self, job: _Job) -> None:
         match job:

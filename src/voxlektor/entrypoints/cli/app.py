@@ -27,7 +27,17 @@ from typer._click.exceptions import ClickException
 
 from voxlektor.contracts.codec import ProtocolError
 from voxlektor.domain.errors import DomainError
-from voxlektor.entrypoints.cli import config, control, output, setup, speak, voices, warm, watch
+from voxlektor.entrypoints.cli import (
+    config,
+    control,
+    output,
+    profiles,
+    setup,
+    speak,
+    voices,
+    warm,
+    watch,
+)
 
 app = typer.Typer(
     name="vxl",
@@ -51,6 +61,7 @@ app.command("setup")(setup.setup)
 app.command("warm")(warm.warm)
 app.command("watch")(watch.watch)
 app.add_typer(config.config_app, name="config")
+app.add_typer(profiles.profiles_app, name="profiles")
 
 _COMMANDS = frozenset(
     {
@@ -70,6 +81,7 @@ _COMMANDS = frozenset(
         "warm",
         "watch",
         "config",
+        "profiles",
     }
 )
 _HELP = "--help"
@@ -81,12 +93,14 @@ _SAY_LONG = frozenset(
         "--lang",
         "--rate",
         "--volume",
+        "--steps",
         "--now",
         "--owner",
         "--group",
         "--tag",
         "--preempt",
         "--json",
+        "--profile",
         _HELP,
     }
 )

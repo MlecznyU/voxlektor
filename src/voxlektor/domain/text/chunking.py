@@ -52,6 +52,12 @@ def _paragraph_chunks(paragraph: str, max_chars: int) -> list[str]:
     return _pack(units, max_chars)
 
 
+def split_paragraphs(text: str) -> list[str]:
+    """Split text on blank lines into paragraphs with whitespace collapsed; blank ones dropped."""
+    paragraphs = (" ".join(raw.split()) for raw in _PARAGRAPH.split(text))
+    return [p for p in paragraphs if p]
+
+
 def split_text(
     text: str, max_chars: int = limits.MAX_CHARS, merge_below: int = limits.MERGE_BELOW
 ) -> list[str]:
@@ -67,10 +73,8 @@ def split_text(
     if merge_below < 0:
         raise ValueError(f"merge_below must not be negative, got {merge_below}")
     chunks: list[str] = []
-    for raw in _PARAGRAPH.split(text):
-        paragraph = " ".join(raw.split())
-        if paragraph:
-            chunks.extend(_paragraph_chunks(paragraph, max_chars))
+    for paragraph in split_paragraphs(text):
+        chunks.extend(_paragraph_chunks(paragraph, max_chars))
 
     merged: list[str] = []
     for chunk in chunks:

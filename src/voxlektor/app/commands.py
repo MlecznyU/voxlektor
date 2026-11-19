@@ -28,6 +28,7 @@ class Speak:
     group: str | None = field(default=None, kw_only=True)
     tag: str | None = field(default=None, kw_only=True)
     preempt: bool = field(default=False, kw_only=True)
+    steps: int | None = field(default=None, kw_only=True)  # 4..32 diffusion steps (S2)
 
 
 @dataclass(frozen=True, slots=True)

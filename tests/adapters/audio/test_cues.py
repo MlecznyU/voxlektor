@@ -1,5 +1,6 @@
 """Cue players: the memory recorder and the sounddevice player (device-free, with a fake stream)."""
 
+import contextlib
 import io
 import logging
 from collections.abc import Callable, Iterator
@@ -23,52 +24,96 @@ type _Callback = Callable[[npt.NDArray[np.float32], int, object, sd.CallbackFlag
 
 
 class FakeStream:
+    """Stands in for ``sd.OutputStream``; enforces CoreAudio's rule (see the sounddevice tests).
+
+    Closing a stream while its callback stops it (raised ``CallbackStop``, finished callback
+    not yet delivered) deadlocks; closing a running stream first runs one IO cycle "at the same
+    moment", which must not stop it either. ``drain`` delivers the finished callback unless told
+    not to (CoreAudio still stopping the stream).
+    """
+
     instances: ClassVar[list["FakeStream"]] = []
     fail_open: ClassVar[bool] = False
+    fail_start: ClassVar[bool] = False
 
-    def __init__(self, *, samplerate: float, callback: _Callback, **ignored: object) -> None:
+    def __init__(
+        self,
+        *,
+        samplerate: float,
+        callback: _Callback,
+        finished_callback: Callable[[], None],
+        **options: object,
+    ) -> None:
         if FakeStream.fail_open:
             raise sd.PortAudioError("no device")
+        self.options = options
         self.samplerate = samplerate
         self.callback = callback
+        self.finished_callback = finished_callback
         self.started = False
-        self.active = False  # sounding: started and not yet stopped by its callback
         self.closed = False
+        self.stopping_itself = False
+        self.finished = False
         FakeStream.instances.append(self)
 
     def start(self) -> None:
+        if FakeStream.fail_start:
+            raise sd.PortAudioError("no device")
         self.started = True
-        self.active = True
-
-    def abort(self, ignore_errors: bool = True) -> None:
-        pass
 
     def close(self, ignore_errors: bool = True) -> None:
         assert not self.closed, "stream closed twice"
+        assert not self.stopping_itself, "deadlock: close while the callback stops the stream"
+        if self.started and not self.finished:
+            try:
+                self._cycle(1)  # an IO cycle in flight at this very moment
+            except sd.CallbackStop:
+                raise AssertionError("deadlock: close raced the callback stopping it") from None
         self.closed = True
+        self.finish()
 
-    def drain(self, frames: int = 512) -> npt.NDArray[np.float32]:
+    def finish(self) -> None:
+        self.stopping_itself = False
+        if self.started and not self.finished:
+            self.finished = True
+            self.finished_callback()
+
+    def _cycle(self, frames: int, blocks: list[npt.NDArray[np.float32]] | None = None) -> None:
+        outdata = np.full((frames, 1), 7.0, dtype=np.float32)
+        try:
+            self.callback(outdata, frames, None, sd.CallbackFlags())
+        except sd.CallbackStop:
+            self.stopping_itself = True
+            raise
+        finally:
+            if blocks is not None:
+                blocks.append(outdata[:, 0].copy())
+
+    def pull(self, frames: int) -> None:
+        """One IO cycle of ``frames`` frames."""
+        self._cycle(frames)
+
+    def drain(self, frames: int = 512, *, finish: bool = True) -> npt.NDArray[np.float32]:
         """Pull blocks until the callback stops; return everything it wrote."""
         blocks: list[npt.NDArray[np.float32]] = []
-        while True:
-            outdata = np.full((frames, 1), 7.0, dtype=np.float32)
-            try:
-                self.callback(outdata, frames, None, sd.CallbackFlags())
-            except sd.CallbackStop:
-                self.active = False
-                blocks.append(outdata[:, 0].copy())
-                return np.concatenate(blocks)
-            blocks.append(outdata[:, 0].copy())
+        with contextlib.suppress(sd.CallbackStop):
+            while True:
+                self._cycle(frames, blocks)
+        if finish:
+            self.finish()
+        return np.concatenate(blocks)
 
 
 @pytest.fixture(autouse=True)
 def fake_stream(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     FakeStream.instances = []
     FakeStream.fail_open = False
+    FakeStream.fail_start = False
     monkeypatch.setattr(sd, "OutputStream", FakeStream)
     yield
     FakeStream.instances = []
     FakeStream.fail_open = False
+    FakeStream.fail_start = False
 
 
 def test_memory_player_records_cues_in_order() -> None:
@@ -78,6 +123,12 @@ def test_memory_player_records_cues_in_order() -> None:
     port.play(Cue.STOPPED, 80)
     assert player.played == [Cue.RETRY, Cue.STOPPED]
     assert player.calls == [(Cue.RETRY, 50), (Cue.STOPPED, 80)]
+
+
+def test_cue_streams_use_the_reading_stream_latency() -> None:
+    # The same GIL-dropout reasoning as the reading output: 0.2 s of device buffer.
+    SoundDeviceCuePlayer().play(Cue.RETRY)
+    assert FakeStream.instances[-1].options["latency"] == 0.2
 
 
 def _played(cue: Cue, volume: int) -> npt.NDArray[np.float32]:
@@ -249,3 +300,41 @@ def test_a_cue_after_a_playback_failure_opens_on_the_current_device(reinits: Rei
     assert FakeStream.instances[-1].started
     player.play(Cue.RETRY)
     assert reinits.count == 1  # once
+
+
+# ---------------------------------------------------------------- never stopped twice at once
+
+
+def test_a_cue_stopping_itself_is_closed_only_after_it_finished(reinits: Reinits) -> None:
+    player = SoundDeviceCuePlayer()
+    player.play(Cue.RETRY)
+    first = FakeStream.instances[0]
+    first.drain(finish=False)  # its callback stops it; CoreAudio is still stopping it
+    assert portaudio.refresh_devices(idle=True) is False  # Pa_Terminate would close it
+    assert reinits.count == 0
+    player.play(Cue.RETRY)  # the next cue must not close it now either
+    assert not first.closed
+    first.finish()
+    player.close()
+    assert first.closed
+    assert FakeStream.instances[1].closed
+
+
+def test_a_cue_at_its_last_sample_closed_by_the_next_one_is_not_stopped_twice() -> None:
+    player = SoundDeviceCuePlayer()
+    player.play(Cue.RETRY)
+    length = len(FakeStream.instances[0].drain(frames=1)) - 1  # the last block is the stop
+    player.play(Cue.RETRY)
+    second = FakeStream.instances[1]
+    second.pull(length)  # every sample handed over; the next cycle would stop the stream
+    player.play(Cue.RETRY)  # FakeStream.close runs that cycle at the same moment
+    assert second.closed
+
+
+def test_a_cue_whose_start_failed_is_closed_at_once(reinits: Reinits) -> None:
+    player = SoundDeviceCuePlayer()
+    FakeStream.fail_start = True
+    player.play(Cue.RETRY)
+    assert FakeStream.instances[0].closed
+    FakeStream.fail_start = False
+    assert portaudio.refresh_devices(idle=True) is True  # nothing left to wait for

@@ -2,7 +2,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from voxlektor.domain.text.chunking import split_text
+from voxlektor.domain.text.chunking import split_paragraphs, split_text
+
+
+def test_split_paragraphs_normalises_and_drops_blank_ones() -> None:
+    text = "  First   line\nstill first.\n\n \t\n\nSecond.\n  \nThird. "
+    assert split_paragraphs(text) == ["First line still first.", "Second.", "Third."]
+    assert split_paragraphs(" \n\n ") == []
 
 
 def test_short_paragraphs_are_merged() -> None:

@@ -8,6 +8,7 @@ import numpy as np
 from voxlektor.adapters.audio.memory_out import MemoryOutput
 from voxlektor.app.ports import Option
 from voxlektor.contracts.engine import (
+    ENGINE_API,
     AudioChunk,
     Capability,
     EngineSpec,
@@ -46,6 +47,9 @@ class FakeEngine:
     Transient failures: with ``fail_times=None`` every synthesis matching ``fail_on`` fails;
     with ``fail_times=N`` only the first N matching syntheses fail and later ones succeed.
     ``fail_prepare=N`` makes the first N ``prepare_voice`` calls raise (then they succeed).
+
+    ``native_rate=True`` declares ``Capability.RATE`` and divides the audio length by ``rate``;
+    otherwise ``rate`` is ignored. ``synth_options`` records ``(rate, steps)`` per call.
     """
 
     PROMPT_FORMAT = 1
@@ -60,15 +64,21 @@ class FakeEngine:
         *,
         fail_times: int | None = None,
         fail_prepare: int = 0,
+        native_rate: bool = False,
     ) -> None:
+        capabilities = {Capability.LIVE, Capability.CLONE}
+        if native_rate:
+            capabilities.add(Capability.RATE)
         self.spec = EngineSpec(
             id="fake",
             revision="fake0001",
             prompt_format=self.PROMPT_FORMAT,
             sample_rate=sample_rate,
             langs=frozenset({"pl", "en"}),
-            capabilities=frozenset({Capability.LIVE, Capability.CLONE}),
+            capabilities=frozenset(capabilities),
+            api=ENGINE_API,
         )
+        self._native_rate = native_rate
         self._seconds_per_char = seconds_per_char
         self._delay_s = delay_s
         self._fail_on = fail_on
@@ -79,6 +89,7 @@ class FakeEngine:
         self.unload_calls = 0
         self.prepare_calls = 0
         self.synth_calls: list[tuple[str, str]] = []
+        self.synth_options: list[tuple[float, int | None]] = []
 
     def load(self) -> None:
         self.load_calls += 1
@@ -110,12 +121,21 @@ class FakeEngine:
             raise ValueError("corrupt fake prompt") from exc
         return VoicePrompt(voice, self.PROMPT_FORMAT, text)
 
-    def synthesize(self, text: str, lang: str, prompt: VoicePrompt) -> Iterator[AudioChunk]:
+    def synthesize(
+        self,
+        text: str,
+        lang: str,
+        prompt: VoicePrompt,
+        *,
+        rate: float = 1.0,
+        steps: int | None = None,
+    ) -> Iterator[AudioChunk]:
         self._require_loaded()
         if lang not in self.spec.langs:
             raise ValueError(f"unsupported language {lang!r}")
         self.synth_calls.append((text, lang))
-        return self._chunks(text)
+        self.synth_options.append((rate, steps))
+        return self._chunks(text, rate if self._native_rate else 1.0)
 
     def _use_up_failure(self) -> bool:
         if self._synth_failures_left is None:
@@ -129,12 +149,12 @@ class FakeEngine:
         if not self._loaded:
             raise RuntimeError("engine not loaded")
 
-    def _chunks(self, text: str) -> Iterator[AudioChunk]:
+    def _chunks(self, text: str, speed: float) -> Iterator[AudioChunk]:
         time.sleep(self._delay_s)
         if self._fail_on is not None and self._fail_on in text and self._use_up_failure():
             raise RuntimeError(f"fake engine failure on {self._fail_on!r}")
         rate = self.spec.sample_rate
-        total = max(1, round(len(text) * self._seconds_per_char * rate))
+        total = max(1, round(len(text) * self._seconds_per_char * rate / speed))
         for start in range(0, total, rate):
             index = np.arange(start, min(start + rate, total), dtype=np.float64)
             tone = _AMPLITUDE * np.sin(2.0 * np.pi * _TONE_HZ * index / rate)
@@ -279,8 +299,11 @@ class FakeModelStore:
 class InMemorySettingsStore:
     """A SettingsStore in memory: ``file`` and ``env`` layers; ``writes`` in order.
 
-    ``write_value`` stores the raw string in ``file`` (no coercion; the TOML store's job).
+    ``file`` is the merged view (globals + the ``default`` profile); ``profiles`` holds the
+    other profiles. Writes store the raw string (no coercion; the TOML store's job).
     """
+
+    _GLOBALS = frozenset({"engine", "history", "idle_timeout", "autostart", "floor_grace"})
 
     def __init__(
         self,
@@ -288,11 +311,16 @@ class InMemorySettingsStore:
         env: dict[str, object] | None = None,
         *,
         completed: bool = False,
+        profiles: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self.file: dict[str, object] = dict(file or {})
         self.env: dict[str, object] = dict(env or {})
         self.completed = completed
+        self.profiles: dict[str, dict[str, object]] = {
+            name: dict(table) for name, table in (profiles or {}).items()
+        }
         self.writes: list[tuple[str, str]] = []
+        self.profile_writes: list[tuple[str, str, str]] = []
 
     def read_file(self) -> dict[str, object]:
         return dict(self.file)
@@ -303,6 +331,29 @@ class InMemorySettingsStore:
     def write_value(self, key: str, value: str) -> None:
         self.writes.append((key, value))
         self.file[key] = value
+
+    def read_globals(self) -> dict[str, object]:
+        return {key: value for key, value in self.file.items() if key in self._GLOBALS}
+
+    def read_profiles(self) -> dict[str, dict[str, object]]:
+        default = {k: v for k, v in self.file.items() if k not in self._GLOBALS}
+        return {"default": default} | {name: dict(t) for name, t in self.profiles.items()}
+
+    def write_profile_value(self, profile: str, key: str, value: str) -> None:
+        self.profile_writes.append((profile, key, value))
+        self._table(profile)[key] = value
+
+    def create_profile(self, profile: str) -> None:
+        self._table(profile)
+
+    def unset_profile_value(self, profile: str, key: str) -> None:
+        self._table(profile).pop(key, None)
+
+    def remove_profile(self, profile: str) -> None:
+        del self.profiles[profile]
+
+    def _table(self, profile: str) -> dict[str, object]:
+        return self.file if profile == "default" else self.profiles.setdefault(profile, {})
 
     def setup_completed(self) -> bool:
         return self.completed

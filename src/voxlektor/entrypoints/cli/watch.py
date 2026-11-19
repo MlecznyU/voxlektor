@@ -1,8 +1,9 @@
 """``vxl watch``: the daemon's events on stdout, one line each, flushed per line, until it ends.
 
 With ``--json`` each line is one JSON object: the event frame's ``data`` plus ``"event"``; the
-first is always ``snapshot`` (the status). Without it, a readable line per event: the name and
-its non-null fields as ``key=value``.
+first is always ``snapshot`` (the status, plus ``"protocol"``: the protocol version the stream
+speaks, ``PROTOCOL_VERSION``; a daemon's own ``protocol`` key would win). Without it, a
+readable line per event: the name and its non-null fields as ``key=value``.
 
 ``--owner X`` keeps what concerns X: events whose ``owner`` is X, every ``floor`` event, ``state``,
 and ``drained``/``error``/``paused``/``resumed`` with ``owner: null`` (daemon-wide). ``waiting``
@@ -42,13 +43,14 @@ import typer
 import voxlektor
 from voxlektor.adapters.transport.unix_stream import open_stream
 from voxlektor.bootstrap.client import ClientContext, build_client
-from voxlektor.contracts.protocol import OWNER_PATTERN
+from voxlektor.contracts.protocol import OWNER_PATTERN, PROTOCOL_VERSION
 from voxlektor.domain.errors import DomainError, NotRunning, ServiceUnavailable
 from voxlektor.entrypoints.cli.output import EXIT_OK, EXIT_UNAVAILABLE
 
 _RETRY_S = 1.0
 _CONNECT_TIMEOUT_S = 5.0
 _EVENT = "event"
+_SNAPSHOT = "snapshot"
 _DAEMON_OFF = "daemon_off"
 _DISCONNECTED = "disconnected"
 # Events that belong to one owner; of these, only the daemon-wide ones pass with ``owner: null``.
@@ -202,6 +204,8 @@ def _write(line: str) -> None:
 
 
 def _json_line(event: Mapping[str, object]) -> None:
+    if event.get(_EVENT) == _SNAPSHOT:  # tools gate on the protocol version (absent means 1)
+        event = {"protocol": PROTOCOL_VERSION, **event}
     _write(json.dumps(event))
 
 

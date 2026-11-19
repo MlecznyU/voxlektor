@@ -35,8 +35,8 @@ from typing import Protocol
 import msgspec
 
 import voxlektor
+from voxlektor.adapters.audio.dsp import fade_edges, time_stretch, trim_edges
 from voxlektor.adapters.audio.dsp import level as dsp_level
-from voxlektor.adapters.audio.dsp import time_stretch
 from voxlektor.adapters.audio.memory_out import MemoryCuePlayer, MemoryOutput
 from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
 from voxlektor.adapters.transport.mapping import error_reply, to_command, to_wire_reply
@@ -242,8 +242,11 @@ def build_daemon(
         reply = session.handle(Status()).reply
         return {} if reply is None else reply.data
 
-    # Starts the engine thread; every chunk: time_stretch, then level (normalise, volume, limit).
-    worker = EngineWorker(load_engine, repo, time_stretch, level=dsp_level)
+    # Starts the engine thread; every chunk: trim edge silence, time_stretch (unless the engine
+    # speaks the rate itself), fade the edges, then level (normalise, volume, limit).
+    worker = EngineWorker(
+        load_engine, repo, time_stretch, level=dsp_level, trim=trim_edges, fade=fade_edges
+    )
     try:
         core = CoreLoop(session, worker, output, AudioBuffers(), clock, cues, events=hub)
     except BaseException:

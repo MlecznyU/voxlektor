@@ -64,6 +64,8 @@ class SpeakRequest(_Request, tag="speak"):
     group: _Label | None = None
     tag: _Label | None = None
     preempt: bool = False
+    # Added within v1 (S2): diffusion steps per chunk; engines without the notion ignore it.
+    steps: Annotated[int, msgspec.Meta(ge=4, le=32)] | None = None
 
 
 class PauseRequest(_Request, tag="pause"):

@@ -3,7 +3,14 @@
 from pathlib import Path
 
 from voxlektor.app.commands import Speak
-from voxlektor.app.effects import CancelGeneration, Emit, Generate
+from voxlektor.app.effects import (
+    AbortPlayback,
+    CancelGeneration,
+    Effect,
+    Emit,
+    Generate,
+    StartPlayback,
+)
 from voxlektor.app.session import Session
 from voxlektor.app.voices import VoiceCatalog
 from voxlektor.contracts.engine import VoiceRef
@@ -47,6 +54,22 @@ def test_cancel_generation_drops_the_queued_jobs_of_those_epochs_only() -> None:
     sim.step()
     # Chunk 0 counts as running and cannot be cancelled; chunk 1 is skipped; epoch 5 is spared.
     assert [text for text, _ in sim.engine.synth_calls] == [texts[0], "another epoch"]
+
+
+def test_start_playback_hands_its_lead_to_the_output() -> None:
+    clock = FakeClock()
+    repo = InMemoryVoiceRepository([VoiceRef(VOICE, Path("/voices/v0/ref.wav"), "reference")])
+    session = Session(Settings(engine=EngineId("fake")), VoiceCatalog(repo), clock)
+    output = MemoryOutput(auto_complete=False)
+    sim = Simulator(session, FakeEngine(sample_rate=100), output, clock)
+    texts = [f"Chunk {n} {SENTENCE}" for n in range(2)]
+    assert sim.handle(Speak("\n\n".join(texts), None, "en", None, False)).ok
+    first, second = output.started[0], ChunkId(int(output.started[0]) + 1)
+    assert second in sim.audio
+    effects: list[Effect] = [AbortPlayback(), StartPlayback(second, lead_s=0.5)]
+    sim.apply(effects)
+    assert output.started == [first, second]
+    assert output.leads == [0.0, 0.5]
 
 
 def test_cancel_generation_with_no_jobs_does_nothing() -> None:

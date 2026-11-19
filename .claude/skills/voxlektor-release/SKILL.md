@@ -23,6 +23,14 @@ clients (dialogue-box) see features missing without any hint why.
 
 If unsure whether the current version was already released, ask the owner: do not guess.
 
+## Client compatibility promise (dialogue-box relies on it)
+
+Within 0.x: protocol v1 stays strictly additive, and the CLI commands/options, exit codes and
+`setup --check` fields are frozen surface. Every new client-visible capability gets a `features`
+entry (`entrypoints/cli/setup.py` `FEATURES`). A breaking client change only comes with protocol
+v2 **and** a new major (1.0). Clients therefore accept `>=0.2.0,<1.0.0` and gate on `features`
+plus the protocol version. Pinned install tags (`vX.Y.Z`) are per client release.
+
 ## Where
 
 Exactly two places, kept equal by `tests/test_package.py::test_version_is_exposed_without_side_effects`:

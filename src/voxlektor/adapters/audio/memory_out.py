@@ -28,6 +28,7 @@ class MemoryOutput:
         self._on_done: Callable[[ChunkId], None] | None = None
         self._on_failed: Callable[[ChunkId, str], None] | None = None
         self.started: list[ChunkId] = []
+        self.leads: list[float] = []  # the lead_s of every start, parallel to ``started``
         self.aborted = 0
         self.paused = False
 
@@ -41,9 +42,12 @@ class MemoryOutput:
         self._on_done = on_done
         self._on_failed = on_failed
 
-    def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
+    def start(
+        self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+    ) -> None:
         del samples, sample_rate
         self.started.append(chunk)
+        self.leads.append(lead_s)
         if self._auto_complete:
             self.complete(chunk)
 

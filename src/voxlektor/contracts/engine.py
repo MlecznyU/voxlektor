@@ -1,4 +1,9 @@
-"""Engine SPI v1: what an engine adapter implements and what flows through it."""
+"""Engine SPI v2: what an engine adapter implements and what flows through it.
+
+``ENGINE_API`` 2 (0.3.0): ``synthesize`` takes the keywords ``rate`` and ``steps``; an engine
+says which SPI it implements in ``EngineSpec.api`` (default 1: written before the field). The
+registry refuses an engine whose ``api`` differs from ``ENGINE_API``.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ if typing.TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
-ENGINE_API = 1
+ENGINE_API = 2
 
 
 class Capability(StrEnum):
@@ -21,6 +26,7 @@ class Capability(StrEnum):
     RENDER = "render"
     CLONE = "clone"
     DESIGN = "design"
+    RATE = "rate"  # speaks ``synthesize(rate=...)`` itself (no time-stretch needed)
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,7 @@ class EngineSpec:
     sample_rate: int
     langs: frozenset[str]
     capabilities: frozenset[Capability]
+    api: int = 1  # the Engine SPI version implemented (``ENGINE_API``); last: additive
 
 
 @dataclass(frozen=True)
@@ -102,4 +109,20 @@ class Engine(Protocol):
         """Rebuild a prompt from ``serialize_prompt`` output; raise ``ValueError`` on bad data."""
         ...
 
-    def synthesize(self, text: str, lang: str, prompt: VoicePrompt) -> Iterator[AudioChunk]: ...
+    def synthesize(
+        self,
+        text: str,
+        lang: str,
+        prompt: VoicePrompt,
+        *,
+        rate: float = 1.0,
+        steps: int | None = None,
+    ) -> Iterator[AudioChunk]:
+        """Speak ``text``; every engine accepts both keywords.
+
+        ``rate`` (1.0 = the voice's own pace) is honoured only by engines with
+        ``Capability.RATE``; others ignore it (the caller stretches). ``steps`` is an engine
+        quality/speed knob (diffusion steps); ``None`` means the engine's default, and engines
+        without such a notion ignore it.
+        """
+        ...

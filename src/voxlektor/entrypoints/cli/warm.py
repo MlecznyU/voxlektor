@@ -6,18 +6,30 @@ setup`` has completed); with ``service.autostart = false`` there is no daemon to
 does nothing (exit 0). ``warm`` starts work, so an idle daemon of another version is replaced
 first (``ClientContext.ensure`` with ``work``); a busy older daemon that does not know ``load``
 is reading already, so its engine is warm: that also exits 0.
+
+``--profile NAME`` resolves that profile's settings (an unknown or invalid name is exit 1 before
+any request); ``load`` itself carries no settings, so the engine is the same for every profile.
 """
 
-from voxlektor.bootstrap.client import build_client
+from typing import Annotated
+
+import typer
+
+from voxlektor.bootstrap.client import build_profile_client
 from voxlektor.domain.errors import DomainError
 from voxlektor.entrypoints.cli.output import EXIT_OK
 
 _UNKNOWN_COMMAND = "unknown_command"
 
 
-def warm() -> int:
+def warm(
+    profile: Annotated[
+        str | None,
+        typer.Option("--profile", metavar="NAME", help="Warm up for this profile."),
+    ] = None,
+) -> int:
     """Load the engine now, so the next reading starts quickly."""
-    ctx = build_client({})
+    ctx = build_profile_client(profile, {})
     if not ctx.store.setup_completed():
         raise DomainError("not_set_up", "voxlektor is not set up yet; run: vxl setup")
     if not ctx.settings.autostart:

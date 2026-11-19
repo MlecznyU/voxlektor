@@ -247,10 +247,18 @@ class _GatedEngine(FakeEngine):
         self.entered = threading.Event()
         self.gate = threading.Event()
 
-    def synthesize(self, text: str, lang: str, prompt: VoicePrompt) -> Iterator[AudioChunk]:
+    def synthesize(
+        self,
+        text: str,
+        lang: str,
+        prompt: VoicePrompt,
+        *,
+        rate: float = 1.0,
+        steps: int | None = None,
+    ) -> Iterator[AudioChunk]:
         self.entered.set()
         assert self.gate.wait(TIMEOUT)
-        return super().synthesize(text, lang, prompt)
+        return super().synthesize(text, lang, prompt, rate=rate, steps=steps)
 
 
 @pytest.mark.usefixtures("no_leaked_threads")

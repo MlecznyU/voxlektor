@@ -156,6 +156,28 @@ def test_in_memory_settings_store_records_writes() -> None:
     assert store.setup_completed() is True
 
 
+def test_in_memory_settings_store_profiles() -> None:
+    store = InMemorySettingsStore({"engine": "fake", "voice": "a"}, profiles={"c": {"rate": 1.1}})
+    assert store.read_globals() == {"engine": "fake"}
+    assert store.read_profiles() == {"default": {"voice": "a"}, "c": {"rate": 1.1}}
+    store.write_profile_value("default", "lang", "pl")
+    store.write_profile_value("n", "rate", "2")
+    store.unset_profile_value("default", "voice")
+    store.unset_profile_value("c", "rate")
+    assert store.read_file() == {"engine": "fake", "lang": "pl"}
+    assert store.read_profiles() == {"default": {"lang": "pl"}, "c": {}, "n": {"rate": "2"}}
+    store.create_profile("default")
+    store.create_profile("n")
+    store.create_profile("e")
+    assert store.profiles["e"] == {}
+    assert store.profiles["n"] == {"rate": "2"}
+    store.remove_profile("e")
+    store.remove_profile("c")
+    assert list(store.read_profiles()) == ["default", "n"]
+    assert store.profile_writes == [("default", "lang", "pl"), ("n", "rate", "2")]
+    assert store.writes == []
+
+
 def test_fake_sample_player_records() -> None:
     player = FakeSamplePlayer()
     player.play("hi", "a", "en", 1.0, 50)

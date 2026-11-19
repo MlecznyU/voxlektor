@@ -25,6 +25,8 @@ SNAPSHOT: dict[str, object] = {
     "group": None,
     "version": VERSION,
 }
+# The --json snapshot line: the snapshot plus the protocol version, for tools to gate on.
+SNAPSHOT_LINE: dict[str, object] = {"event": "snapshot", "protocol": 1, **SNAPSHOT}
 
 
 @pytest.fixture
@@ -55,15 +57,23 @@ def test_watch_prints_snapshot_first(sock: Path, capsys: pytest.CaptureFixture[s
     (sent,) = server.received
     assert sent["cmd"] == "subscribe"
     lines = _json_lines(capsys.readouterr().out)
-    assert lines[0] == {"event": "snapshot", **SNAPSHOT}
+    assert lines[0] == SNAPSHOT_LINE
     assert lines[1] == {"event": "floor", "owner": "a", "group": "g1"}
+
+
+def test_watch_json_snapshot_keeps_a_protocol_the_daemon_sent(
+    sock: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    server = EventServer(sock, stream_of(frame("snapshot", {**SNAPSHOT, "protocol": 7})))
+    _run(server, "--json")
+    assert _json_lines(capsys.readouterr().out)[0]["protocol"] == 7
 
 
 def test_watch_disconnected_exit_2(sock: Path, capsys: pytest.CaptureFixture[str]) -> None:
     server = EventServer(sock, stream_of(frame("snapshot", SNAPSHOT)))
     assert _run(server, "--json") == 2
     assert _json_lines(capsys.readouterr().out) == [
-        {"event": "snapshot", **SNAPSHOT},
+        SNAPSHOT_LINE,
         {"event": "disconnected"},
     ]
 
@@ -113,7 +123,7 @@ def test_watch_waits_for_daemon(
     assert sleeps == [1.0, 1.0]
     assert _json_lines(capsys.readouterr().out) == [
         {"event": "daemon_off"},
-        {"event": "snapshot", **SNAPSHOT},
+        SNAPSHOT_LINE,
         {"event": "disconnected"},
     ]
 
@@ -139,7 +149,7 @@ def test_watch_start_starts_daemon(
         for server in servers:
             server.join()
     assert len(servers) == 1
-    assert _json_lines(capsys.readouterr().out)[0] == {"event": "snapshot", **SNAPSHOT}
+    assert _json_lines(capsys.readouterr().out)[0] == SNAPSHOT_LINE
 
 
 def test_watch_without_start_never_starts_daemon(
@@ -165,7 +175,7 @@ def test_watch_sigterm_exit_0(
         hold=True,
     )
     assert _run(server, "--json") == 0
-    assert _json_lines(capsys.readouterr().out) == [{"event": "snapshot", **SNAPSHOT}]
+    assert _json_lines(capsys.readouterr().out) == [SNAPSHOT_LINE]
     assert signal.getsignal(signal.SIGTERM) == before
 
 
@@ -345,7 +355,7 @@ def test_watch_replaces_idle_pre_s1_daemon(
             server.join()
     assert calls == [True]
     assert _json_lines(capsys.readouterr().out) == [
-        {"event": "snapshot", **SNAPSHOT},
+        SNAPSHOT_LINE,
         {"event": "disconnected"},
     ]
 
@@ -436,7 +446,7 @@ def test_watch_restarts_an_idle_outdated_daemon_and_reconnects(
     assert calls == [True]
     assert len(servers) == (1 if start else 2)
     assert _json_lines(capsys.readouterr().out) == [
-        {"event": "snapshot", **SNAPSHOT},
+        SNAPSHOT_LINE,
         {"event": "disconnected"},
     ]
 
@@ -454,7 +464,7 @@ def test_watch_marks_a_busy_outdated_daemon(
     assert _run(server, "--json") == 2
     assert calls == [True]
     assert _json_lines(capsys.readouterr().out) == [
-        {"event": "snapshot", **OLD, "daemon_outdated": True},
+        {"event": "snapshot", "protocol": 1, **OLD, "daemon_outdated": True},
         {"event": "floor", "owner": "a", "group": "g1"},
         {"event": "disconnected"},
     ]
@@ -469,6 +479,7 @@ def test_watch_start_with_a_busy_outdated_daemon_checks_once(
     assert calls == [True]
     assert _json_lines(capsys.readouterr().out)[0] == {
         "event": "snapshot",
+        "protocol": 1,
         **OLD,
         "daemon_outdated": True,
     }
@@ -494,7 +505,7 @@ def test_watch_autostart_off_keeps_an_outdated_daemon(
     assert _run(server, "--json") == 2
     assert calls == []
     assert _json_lines(capsys.readouterr().out) == [
-        {"event": "snapshot", **OLD, "daemon_outdated": True},
+        {"event": "snapshot", "protocol": 1, **OLD, "daemon_outdated": True},
         {"event": "disconnected"},
     ]
 
@@ -510,6 +521,7 @@ def test_watch_start_with_autostart_off_does_not_replace(
     assert calls == [False]
     assert _json_lines(capsys.readouterr().out)[0] == {
         "event": "snapshot",
+        "protocol": 1,
         **OLD,
         "daemon_outdated": True,
     }
