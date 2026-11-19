@@ -36,11 +36,7 @@ BUNDLED = [
     "m1-calm",
     "m2-narrator",
     "m3-casual",
-    "grace-velvet",
     "zoe-spark",
-    "claire-steady",
-    "nora-amber",
-    "lily-silk",
 ]
 
 

@@ -28,7 +28,7 @@ person's own `vxl`). How their readings queue and what each control command touc
 
 | cmd | arguments | reply `data` |
 |---|---|---|
-| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces all of this owner's readings, see [`now`](#speak-now-and-preempt)), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it), and, added within v1 S1 (earlier daemons ignore them): `owner?` (client id matching `^[A-Za-z0-9._:-]{1,64}$`; `cli` is reserved; default: the owner `cli`), `group?` (1 to 128 characters; default: a fresh daemon-chosen group), `tag?` (1 to 128 characters; labels every chunk of this speak, see [Tags](#tags)), `preempt?` (default false; true takes the floor at once) | `{"chunks": N, "group": "<id>"}`: number of planned chunks and the group they joined (a daemon-chosen `g<n>` when the request named none; added within v1 S1); `{"chunks": 0}` for empty or whitespace-only text (nothing is queued, no event is sent) |
+| `speak` | `text` (required), `voice?`, `lang?` (`auto`/`pl`/`en`), `base_lang?` (`pl`/`en`: the language `auto` detection falls back to when a chunk is ambiguous; default: the daemon's `base_lang` setting), `rate?`, `now?` (default false; true replaces all of this owner's readings, see [`now`](#speak-now-and-preempt)), `volume?` (integer 0 to 100; 50 = the even, normalised level; 0 = silent; default: the daemon's `volume` setting; added within v1, daemons before Etap 1.1 ignore it), and, added within v1 S1 (earlier daemons ignore them): `owner?` (client id matching `^[A-Za-z0-9._:-]{1,64}$`; `cli` is reserved; default: the owner `cli`), `group?` (1 to 128 characters; default: a fresh daemon-chosen group), `tag?` (1 to 128 characters; labels every chunk of this speak, see [Tags](#tags)), `preempt?` (default false; true takes the floor at once), and, added within v1 S2 (earlier daemons ignore it): `steps?` (integer 4 to 32: diffusion steps per chunk, fewer = faster and rougher; default: the daemon's `steps` setting; engines without the notion ignore it) | `{"chunks": N, "group": "<id>"}`: number of planned chunks and the group they joined (a daemon-chosen `g<n>` when the request named none; added within v1 S1); `{"chunks": 0}` for empty or whitespace-only text (nothing is queued, no event is sent) |
 | `pause` | `owner?` (added within v1 S1) | `{}` |
 | `resume` | `owner?` | `{}` |
 | `skip` | `owner?` | `{}` |
@@ -130,7 +130,7 @@ protocol.
 | `paused` | playback is paused |
 | `underruns` | audio underruns since start |
 | `first_audio_s` | seconds from the request to the first audio of the latest reading, `null` if none |
-| `chunks`, `gen_seconds`, `audio_seconds` | metrics of the latest reading |
+| `chunks`, `gen_seconds`, `audio_seconds` | metrics of the latest reading (`audio_seconds`: the audio as played, edge silence trimmed, pauses between chunks not counted) |
 | `last_error` | message of the engine or audio failure that stopped the latest reading, `null` if none; cleared when a new reading starts from idle |
 | `caps` | wire command names this daemon supports (sorted) |
 | `floor` | `{"owner": ..., "group": ...}` of the group holding the floor, `null` when none (added within v1 S1; requests without `owner` belong to the owner `cli`) |
@@ -138,6 +138,29 @@ protocol.
 | `groups` | every queued group in play order: `{"owner", "group", "position", "paused"}`; `position` `0` = the floor holder, `1` = next; groups of paused (passed-over) owners last with `position: null`; `paused` is that owner's pause flag (added within v1 S1) |
 | `tag` | the `speak` tag of the chunk playing, else of the floor group's next chunk, else `null` (added within v1 S1) |
 | `version` | the daemon's package version, e.g. `"0.1.0"` (added within v1 S1; missing on earlier daemons). A CLI command that starts work (`say`, `warm`, `watch`) and finds a different (or no) version replaces the daemon when it is idle (`shutdown` with `if_idle`, then a fresh start); when it is busy the daemon is kept and that command's `--json` output carries `"daemon_outdated": true` |
+
+### `vxl status --json`
+
+The CLI wraps this reply for tools (no wire change): `{"running": true, ...}` with the keys above,
+or `{"running": false}` when no daemon runs. `running` means a daemon process is there, not that
+it answers: a daemon that holds the single-instance lock (`voxlektor.lock`) but does not answer
+`status` within a 2 s grace is `{"running": true, "answering": false, "pid": N}` (`pid` `null`
+when it cannot be told; CLI 0.3.0 on). Such a daemon blocks every new start; `vxl say` / `warm` /
+`watch --start` give it the spawn timeout (15 s, so a cold start or an ordinary stop is never
+taken for a hang) and then fail (exit 2) with `a voxlektor daemon (pid N) holds the lock but does not answer;
+stop it with: vxl stop`, and `vxl stop` sends it SIGTERM, then SIGKILL after 3 s.
+
+Every `vxl status --json` line also carries `"protocol": 1` (CLI 0.3.0 on): the protocol version
+the CLI speaks, which a daemon that answered has replied in. See [Protocol version for
+tools](#protocol-version-for-tools).
+
+### Protocol version for tools
+
+`vxl status --json`, the `vxl watch --json` snapshot line and `vxl setup --check` carry
+`"protocol": 1` (from CLI 0.3.0 on; the wire's `v`). Clients gate on `protocol`; absent means 1.
+A different value means a protocol this client may not understand (a breaking change needs
+`"v":2`); features added within v1 are told apart by `status.caps` and `setup --check`
+`features`.
 
 ### caps
 
@@ -301,7 +324,9 @@ of the new holder. `state` events come where the engine lifecycle changes.
 socket. It is long-running and prints one line per event, flushed per line.
 
 - `--json`: each line is one JSON object, the frame's `data` plus `"event"`; the first is
-  `snapshot`. Without `--json`: `name key=value ...` (non-null fields), for people.
+  `snapshot`, which also carries `"protocol": 1` (CLI 0.3.0 on; see [Protocol version for
+  tools](#protocol-version-for-tools)). Without `--json`: `name key=value ...` (non-null
+  fields), for people.
 - `--owner X` keeps X's events, every `floor`, `state`, `snapshot`, unknown events, and the
   daemon-wide `paused`/`resumed`/`drained`/`error` with `owner: null`; other owners' `waiting`,
   tag, pause, `drained` and `error` events are dropped. `X` must be a valid owner; `cli` is
@@ -352,13 +377,49 @@ Tools key their state on these fields, never on exit codes:
 | `ready` | `setup_completed` and the engine's model is present |
 | `setup_completed` | `vxl setup` has finished once |
 | `version` | the CLI's package version (compare with `status.version`) |
+| `protocol` | the protocol version the CLI speaks: `1` (added in 0.3.0; absent means 1) |
 | `config_path` | the `config.toml` in use |
 | `engine` | the effective engine id |
 | `model` | `null` for an unknown engine, else `present` (bool), `repo`, `revision`, `size_bytes`, `license_name`, `license_url`, `commercial_use` |
-| `settings` | effective settings a reading would use: `voice`, `lang`, `base_lang`, `rate`, `volume`, `idle_timeout_s`, `autostart` |
-| `features` | what this CLI and its daemon offer, sorted: `["owners", "tags", "warm", "watch"]` from S1 on; a missing feature means "update voxlektor" |
+| `settings` | effective settings a reading would use: `voice`, `lang`, `base_lang`, `rate`, `volume`, `steps` (added in 0.3.0), `idle_timeout_s`, `autostart` |
+| `features` | what this CLI and its daemon offer, sorted: `["owners", "profiles", "steps", "tags", "warm", "watch"]`; `profiles` and `steps` (the `steps` setting, `--steps` and the `speak` field) are new in 0.3.0; a missing feature means "update voxlektor" |
+| `profile` | with `--profile NAME`: that name; otherwise `"default"` (added in 0.3.0) |
+| `profile_exists` | `true`, or `false` for an unknown or invalid profile name (added in 0.3.0) |
+
+`vxl setup --check --profile NAME`: `settings` are that profile's effective values (the
+profile's own keys > env > default > built-in; for `default` itself: env > default > built-in).
+For an unknown or invalid name, `profile_exists` is `false`, `ready` is `false`, `settings` are
+what the profile would inherit from `default`, and the exit code is `1`. An invalid value (in
+any profile, a global key or a `VOXLEKTOR_*` variable) is ignored with a warning on stderr and
+the next layer's value is used.
 
 New fields may be added; ignore unknown ones.
+
+## `vxl profiles --json`
+
+One line (0.3.0): `{"profiles": [{"name", "values", "sources"}, ...]}`, `default` first, the rest
+sorted by name. `values` and `sources` cover the profile keys only (`voice`, `lang`, `base_lang`,
+`rate`, `volume`, `steps`; the global keys are not per profile). Each source is `env`, `profile`,
+`default` or `builtin`. An invalid value (in the file or a `VOXLEKTOR_*` variable) is reported
+on stderr and skipped: the line still comes, with the next layer's value and source, exit `0`.
+Only a file that is no valid TOML exits `1` (no JSON line).
+
+```json
+{"profiles": [{"name": "default", "values": {"voice": "v0-default", "rate": 1.0, "...": "..."}, "sources": {"voice": "builtin", "rate": "builtin", "...": "..."}}]}
+```
+
+## `vxl setup --yes --progress json`
+
+Model-download progress for tools. stdout carries JSON lines only; the summary goes to stderr:
+
+- `{"event":"download","done":N,"total":M}` whenever the whole percent or the total changes
+  (bytes; reports with total 0 are skipped);
+- `{"event":"done"}` at the end, also when nothing had to be downloaded;
+- `{"event":"error","message":"..."}` on failure; the exit code is as without `--progress`.
+
+`--progress json` needs `--yes`. A usage error (an unknown, invalid or conflicting option, such
+as `--progress json` without `--yes`) is reported before anything starts: no JSON line at all,
+only the message on stderr. The exit code is authoritative; do not wait for an `error` event.
 
 ## Errors
 

@@ -19,6 +19,9 @@ class AudioOutput(Protocol):
 
     ``samples`` is opaque to the application (a numpy array in production). The callbacks may
     be invoked from any thread; the runtime wraps them to hop back onto the loop.
+
+    ``lead_s`` is the pause to put before the chunk, as a MINIMUM gap: silence already heard
+    since the previous chunk's last sample (not counting time paused) counts toward it.
     """
 
     def set_callbacks(
@@ -27,7 +30,9 @@ class AudioOutput(Protocol):
         on_failed: Callable[[ChunkId, str], None],
     ) -> None: ...
 
-    def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None: ...
+    def start(
+        self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+    ) -> None: ...
 
     def pause(self) -> None: ...
 
@@ -46,11 +51,39 @@ class CuePlayer(Protocol):
 
 
 class SettingsStore(Protocol):
-    def read_file(self) -> dict[str, object]: ...
+    def read_file(self) -> dict[str, object]:
+        """Merged file view: the globals plus the ``default`` profile's keys."""
+        ...
 
     def read_env(self) -> dict[str, object]: ...
 
-    def write_value(self, key: str, value: str) -> None: ...
+    def write_value(self, key: str, value: str) -> None:
+        """Write one setting; a profile key goes into the ``default`` profile."""
+        ...
+
+    def read_globals(self) -> dict[str, object]:
+        """The non-profile settings (``engine``, ``history``, ``[service]`` keys)."""
+        ...
+
+    def read_profiles(self) -> dict[str, dict[str, object]]:
+        """Every profile's overlay by name; ``default`` is always present."""
+        ...
+
+    def write_profile_value(self, profile: str, key: str, value: str) -> None:
+        """Set a profile key (``InvalidSetting`` for a bad value or a non-profile key)."""
+        ...
+
+    def create_profile(self, profile: str) -> None:
+        """Make sure a profile exists (an empty overlay when new); a no-op when it does."""
+        ...
+
+    def unset_profile_value(self, profile: str, key: str) -> None:
+        """Drop a profile key; ``InvalidSetting`` for an unknown profile."""
+        ...
+
+    def remove_profile(self, profile: str) -> None:
+        """Delete a profile; ``InvalidSetting`` for ``default`` or an unknown profile."""
+        ...
 
     def setup_completed(self) -> bool: ...
 

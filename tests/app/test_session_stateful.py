@@ -71,13 +71,21 @@ class _FlakyEngine(FakeEngine):
         self.raised += 1
         raise RuntimeError(f"{what} failure #{self.raised}")
 
-    def synthesize(self, text: str, lang: str, prompt: VoicePrompt) -> Iterator[AudioChunk]:
+    def synthesize(
+        self,
+        text: str,
+        lang: str,
+        prompt: VoicePrompt,
+        *,
+        rate: float = 1.0,
+        steps: int | None = None,
+    ) -> Iterator[AudioChunk]:
         if "BOOM" in text:
             self._fail("synth")
         if self.synth_failures > 0:
             self.synth_failures -= 1
             self._fail("synth")
-        return super().synthesize(text, lang, prompt)
+        return super().synthesize(text, lang, prompt, rate=rate, steps=steps)
 
     def prepare_voice(self, ref: VoiceRef) -> VoicePrompt:
         if self.prepare_failures > 0:

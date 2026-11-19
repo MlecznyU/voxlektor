@@ -21,6 +21,22 @@ def test_warm_starts_daemon(wire: FakeWire, capsys: pytest.CaptureFixture[str]) 
     assert capsys.readouterr().out == ""
 
 
+def test_warm_with_a_profile_loads_the_engine(wire: FakeWire, home: Path) -> None:
+    config = home / "config" / "config.toml"
+    config.write_text(config.read_text() + "[profiles.claude]\nrate = 1.25\n")
+    assert main(["warm", "--profile", "claude"]) == 0
+    assert wire.requests == [{"cmd": "load"}]
+
+
+def test_warm_with_an_unknown_profile_exits_1(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["warm", "--profile", "nobody"]) == 1
+    assert "unknown profile 'nobody'" in capsys.readouterr().err
+    assert wire.requests == []
+    assert wire.ensured == 0
+
+
 def test_warm_restarts_an_outdated_idle_daemon(
     wire: FakeWire, monkeypatch: pytest.MonkeyPatch
 ) -> None:

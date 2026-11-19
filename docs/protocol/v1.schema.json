@@ -400,6 +400,19 @@
           ],
           "default": null
         },
+        "steps": {
+          "anyOf": [
+            {
+              "maximum": 32,
+              "minimum": 4,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "tag": {
           "anyOf": [
             {

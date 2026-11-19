@@ -63,6 +63,7 @@ FROZEN_MODULES: tuple[str, ...] = (
     "voxlektor.domain.playback",
     "voxlektor.domain.keepwarm",
     "voxlektor.domain.reading",
+    "voxlektor.domain.pauses",
     "voxlektor.adapters.audio.dsp",
     "voxlektor.adapters.audio.sounddevice_out",
     "voxlektor.adapters.audio.memory_out",

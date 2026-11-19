@@ -29,11 +29,13 @@ class _RecordingOutput(MemoryOutput):
         self.samples: list[int] = []
         self.started_event = asyncio.Event()
 
-    def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
+    def start(
+        self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+    ) -> None:
         assert sample_rate == 24000
         self.samples.append(np.asarray(samples, dtype=np.float32).size)
         self.started_event.set()
-        super().start(chunk, samples, sample_rate)
+        super().start(chunk, samples, sample_rate, lead_s=lead_s)
 
 
 def test_omnivoice_reads_a_sentence_through_the_daemon(short_tmp: Path) -> None:

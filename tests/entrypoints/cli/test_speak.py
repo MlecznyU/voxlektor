@@ -74,10 +74,10 @@ def test_say_without_text_on_a_terminal_exits_1(
 def no_client(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail the test if the speak path builds a client (or autostarts a daemon)."""
 
-    def forbidden(flags: object) -> None:
-        raise AssertionError("build_client must not run for rejected text")
+    def forbidden(profile: object, flags: object) -> None:
+        raise AssertionError("build_profile_client must not run for rejected text")
 
-    monkeypatch.setattr(speak, "build_client", forbidden)
+    monkeypatch.setattr(speak, "build_profile_client", forbidden)
 
 
 @pytest.mark.usefixtures("no_client")
@@ -237,6 +237,113 @@ def test_volume_reaches_one_shot_mode(wire: FakeWire, monkeypatch: pytest.Monkey
     monkeypatch.setattr(oneshot, "run", fake_run)
     assert main(["--volume", "80", "hello"]) == 0
     assert [s.volume for s in seen] == [80]
+
+
+@pytest.mark.parametrize(
+    "argv", [["say", "--steps", "8", "hi"], ["--steps", "8", "hi"], ["--steps=8", "hi"]]
+)
+def test_steps_flag_goes_into_the_request(wire: FakeWire, argv: list[str]) -> None:
+    assert main(argv) == 0
+    ((req),) = wire.requests
+    assert req["steps"] == 8
+
+
+def test_every_request_carries_the_effective_steps(
+    wire: FakeWire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert main(["hi"]) == 0
+    assert wire.requests[-1]["steps"] == 12
+    monkeypatch.setenv("VOXLEKTOR_STEPS", "12")
+    assert main(["hi"]) == 0
+    assert wire.requests[-1]["steps"] == 12
+    assert main(["--steps", "24", "hi"]) == 0
+    assert wire.requests[-1]["steps"] == 24
+
+
+@pytest.mark.parametrize("value", ["3", "33"])
+def test_invalid_steps_exit_1_before_any_request(
+    wire: FakeWire, capsys: pytest.CaptureFixture[str], value: str
+) -> None:
+    assert main([f"--steps={value}", "hi"]) == 1
+    assert wire.requests == []
+    assert "steps must be an integer between 4 and 32" in capsys.readouterr().err
+
+
+def test_steps_reach_one_shot_mode(wire: FakeWire, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOXLEKTOR_AUTOSTART", "false")
+    seen: list[Settings] = []
+
+    def fake_run(text: str, settings: Settings) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr(oneshot, "run", fake_run)
+    assert main(["--steps", "8", "hello"]) == 0
+    assert [s.steps for s in seen] == [8]
+
+
+_CLAUDE = "[profiles.default]\nrate = 1.5\nvolume = 30\n[profiles.claude]\nrate = 1.25\nsteps = 8\n"
+
+
+def _add_profiles(home: Path) -> None:
+    config = home / "config" / "config.toml"
+    config.write_text(config.read_text() + _CLAUDE)
+
+
+@pytest.mark.parametrize("argv", [["say", "--profile", "claude", "hi"], ["--profile=claude", "hi"]])
+def test_profile_values_reach_the_request(wire: FakeWire, home: Path, argv: list[str]) -> None:
+    _add_profiles(home)
+    assert main(argv) == 0
+    ((req),) = wire.requests
+    assert (req["rate"], req["steps"], req["volume"]) == (1.25, 8, 30)
+
+
+def test_flags_beat_the_profile_and_the_profile_beats_env(
+    wire: FakeWire, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _add_profiles(home)
+    monkeypatch.setenv("VOXLEKTOR_STEPS", "12")  # claude sets steps: the env does not win
+    monkeypatch.setenv("VOXLEKTOR_VOLUME", "60")  # claude does not: the env beats default's 30
+    assert main(["--profile", "claude", "--rate", "2.0", "hi"]) == 0
+    ((req),) = wire.requests
+    assert (req["rate"], req["steps"], req["volume"]) == (2.0, 8, 60)
+
+
+def test_without_profile_the_default_profile_is_read(wire: FakeWire, home: Path) -> None:
+    _add_profiles(home)
+    assert main(["hi"]) == 0
+    ((req),) = wire.requests
+    assert (req["rate"], req["steps"]) == (1.5, 12)
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [("nobody", "unknown profile 'nobody'"), ("Bad Name", "invalid profile name 'Bad Name'")],
+)
+def test_unknown_or_invalid_profile_exits_1_before_any_request(
+    wire: FakeWire, home: Path, capsys: pytest.CaptureFixture[str], name: str, message: str
+) -> None:
+    _add_profiles(home)
+    assert main(["--profile", name, "hi"]) == 1
+    assert message in capsys.readouterr().err
+    assert wire.requests == []
+    assert wire.ensured == 0
+
+
+def test_profile_reaches_one_shot_mode(
+    wire: FakeWire, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _add_profiles(home)
+    monkeypatch.setenv("VOXLEKTOR_AUTOSTART", "false")
+    seen: list[Settings] = []
+
+    def fake_run(text: str, settings: Settings) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr(oneshot, "run", fake_run)
+    assert main(["--profile", "claude", "hello"]) == 0
+    assert [(s.rate, s.steps) for s in seen] == [(1.25, 8)]
 
 
 def test_owner_group_tag_preempt_reach_the_request(wire: FakeWire) -> None:

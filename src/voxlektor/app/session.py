@@ -33,6 +33,13 @@ Model of the reading queue (spec §4):
   now``, a ``resume`` from the holder's owner, or the daemon going idle). The output is paused
   while the hold is on or the holder's owner is paused. The grace of a paused holder counts from
   when a waiter last became eligible (``Floor``), so it restarts on a resume or a hold release.
+* Pauses (S2): every ``StartPlayback`` carries ``lead_s = pause_before(...)`` from the chunk
+  that started last and its group (``domain.pauses``): sentence, paragraph or speak end, group
+  end or owner change (two automatic groups of one owner count as a speak end), 0.25 s after a
+  skip, back, preempt or yield, and 0 for the first chunk of a reading that starts from idle.
+  Only such a reading caps its first two chunks (``plan_reading(cap_start=...)``); a ``speak``
+  appended to a live reading is planned with normal sizes. ``now`` that replaces everything
+  counts as starting from idle.
 * History is per owner: ``back`` stays within the owner's own chunks.
 * Events for clients (spec §5.2) are ``Emit`` effects: ``state`` on every keep-warm life change,
   ``floor`` when a group gets the floor, ``tag_started``/``tag_finished`` per tag run
@@ -103,7 +110,8 @@ from voxlektor.contracts.engine import VoiceRef
 from voxlektor.domain import keepwarm as kw
 from voxlektor.domain.errors import DomainError, InvalidDuration, InvalidSetting, UnknownVoice
 from voxlektor.domain.floor import Floor, GroupKey
-from voxlektor.domain.reading import plan_reading
+from voxlektor.domain.pauses import Boundary, pause_before
+from voxlektor.domain.reading import Chunk, plan_reading
 from voxlektor.domain.settings import Settings, parse_duration
 from voxlektor.domain.types import ChunkId, Epoch
 
@@ -126,6 +134,8 @@ _RATE_MIN = 0.5  # the same bounds as the ``rate`` setting
 _RATE_MAX = 3.0
 _VOLUME_MIN = 0  # the same bounds as the ``volume`` setting
 _VOLUME_MAX = 100
+_STEPS_MIN = 4  # the same bounds as the ``steps`` setting
+_STEPS_MAX = 32
 _RELOAD_ON_FAILURE = 2  # the generation failure that reloads the engine before retrying
 _STOP_ON_FAILURE = 3  # the generation failure that stops the reading
 
@@ -144,11 +154,13 @@ def _reserved() -> Reply:
     return Reply(ok=False, data={}, error=error)
 
 
-def _out_of_range(rate: float, volume: int) -> InvalidSetting | None:
+def _out_of_range(rate: float, volume: int, steps: int) -> InvalidSetting | None:
     if not _RATE_MIN <= rate <= _RATE_MAX:
         return InvalidSetting(f"rate must be between {_RATE_MIN} and {_RATE_MAX}")
     if not _VOLUME_MIN <= volume <= _VOLUME_MAX:
         return InvalidSetting(f"volume must be between {_VOLUME_MIN} and {_VOLUME_MAX}")
+    if not _STEPS_MIN <= steps <= _STEPS_MAX:
+        return InvalidSetting(f"steps must be between {_STEPS_MIN} and {_STEPS_MAX}")
     return None
 
 
@@ -190,7 +202,13 @@ class Session:
         self._cue_volume = settings.volume  # the volume of the latest accepted Speak
         self._tags = Tags()
         self._watch = Watch()
-        self._next_speak = 0  # the id of the next tag run
+        self._next_speak = 0  # the id of the next accepted speak (its chunks and its tag run)
+        # The chunk that started last (even if cut) and its group: the pause before the next
+        # one is chosen from them. Cleared when a reading starts from idle (next lead 0).
+        self._last_chunk: Chunk | None = None
+        self._last_group: GroupKey | None = None
+        self._last_auto = False
+        self._interrupted = False  # skip, back, preempt or yield since the last start
 
     # ------------------------------------------------------------ commands
 
@@ -245,7 +263,8 @@ class Session:
             return Reply(ok=False, data={}, error=err)
         rate = cmd.rate if cmd.rate is not None else self._settings.rate
         volume = cmd.volume if cmd.volume is not None else self._settings.volume
-        error = _out_of_range(rate, volume)
+        steps = cmd.steps if cmd.steps is not None else self._settings.steps
+        error = _out_of_range(rate, volume, steps)
         if error is not None:
             return Reply(ok=False, data={}, error=error)
         owner = cmd.owner or _CLI
@@ -254,7 +273,20 @@ class Session:
         epoch = self._peek_epoch() if fresh else self._groups[mine[0]].epoch
         lang = cmd.lang if cmd.lang is not None else self._settings.lang
         base_lang = cmd.base_lang or self._settings.base_lang
-        plan = plan_reading(cmd.text, lang, base_lang, rate, epoch, self._next_id, volume=volume)
+        # Caps only when the reading starts from idle; ``now`` replaces the owner's own groups.
+        from_idle = all(cmd.now and key[0] == owner for key in self._groups)
+        speak_id = self._next_speak
+        plan = plan_reading(
+            cmd.text,
+            lang,
+            base_lang,
+            rate,
+            epoch,
+            self._next_id,
+            volume=volume,
+            steps=steps,
+            cap_start=from_idle,
+        )
         if not plan:
             return _ok(chunks=0)
         if fresh:
@@ -262,11 +294,12 @@ class Session:
         self._cue_volume = volume
         self._refs[voice] = ref
         self._next_id += len(plan)
+        self._next_speak += 1
         key = self._place(cmd, owner, epoch, out)
         group = self._groups[key]
         speak = None
         if cmd.tag is not None:
-            speak, self._next_speak = self._next_speak, self._next_speak + 1
+            speak = speak_id
             self._tags.open(speak, cmd.tag, key)
         for chunk in plan:
             self._items[chunk.id] = Item(chunk, voice, key, cmd.tag, speak=speak)
@@ -293,9 +326,10 @@ class Session:
         elif not self._floor.groups_of(owner):
             self._errors.pop(owner, None)  # this owner starts again: its error is history
         if key not in self._groups:
-            self._groups[key] = Group(epoch, age)
+            self._groups[key] = Group(epoch, age, auto=cmd.group is None)
             self._floor.add(key, now, age=age)
         if cmd.preempt or (cmd.now and held_floor):
+            self._interrupted = True  # a short breath, unless the daemon was idle (lead 0)
             self._floor.resume_owner(owner, now)  # like ``now``: taking the floor lifts a pause
             interrupted = self._floor.preempt(key, now)
             if interrupted is not None:
@@ -332,6 +366,7 @@ class Session:
         key = self._floor.holder
         if key is None or (owner is not None and key[0] != owner):
             return
+        self._interrupted = True
         group = self._groups[key]
         head = group.chunks.popleft()
         self._tag_ends(self._items[head], "skipped", out)
@@ -364,6 +399,7 @@ class Session:
         history = self._histories.get(target, deque[ChunkId]())
         if head_key is None and not history:
             return
+        self._interrupted = True
         was_active = bool(self._groups)
         self._drop_work(frozenset({target}), out)
         epoch = self._peek_epoch()
@@ -374,7 +410,7 @@ class Session:
             head_key = (target, self._auto_group(target))
             self._next_group += 1
             now = self._clock.now()
-            self._groups[head_key] = Group(epoch, now)
+            self._groups[head_key] = Group(epoch, now, auto=True)
             self._floor.add(head_key, now)
         if history:
             self._groups[head_key].chunks.appendleft(history.pop())
@@ -605,6 +641,7 @@ class Session:
 
     def _interrupt(self, key: GroupKey, out: list[Effect]) -> None:
         """``key`` lost the floor: its chunk restarts later and its ready audio is dropped."""
+        self._interrupted = True
         if self._playing is not None and self._items[self._playing].group == key:
             out.append(AbortPlayback())
             self._playing = None
@@ -683,6 +720,8 @@ class Session:
         self._gen_failures.clear()
         self._prompt_failures.clear()
         self._errors.clear()  # status reports the failure of the latest reading only
+        self._last_chunk, self._last_group, self._last_auto = None, None, False
+        self._interrupted = False
 
     def _take_result(self, epoch: Epoch, chunk: ChunkId) -> bool:
         """True when a result for ``chunk`` is wanted; forget a discarded chunk either way."""
@@ -780,8 +819,18 @@ class Session:
             return
         del self._ahead[head]
         self._playing = head
-        out.append(StartPlayback(head))
         item = self._items[head]
+        auto = self._groups[item.group].auto
+        boundary = Boundary(
+            self._last_chunk,
+            self._last_group,
+            item.group,
+            auto_groups=self._last_auto and auto,
+            interrupted=self._interrupted,
+        )
+        out.append(StartPlayback(head, lead_s=pause_before(boundary)))
+        self._last_chunk, self._last_group, self._last_auto = item.chunk, item.group, auto
+        self._interrupted = False
         if item.speak is not None:
             self._tags.start(item.speak, item.group, out)
         if self._metrics.first_audio_s is None:

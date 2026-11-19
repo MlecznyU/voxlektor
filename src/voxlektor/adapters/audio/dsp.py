@@ -40,14 +40,54 @@ _LOOKAHEAD_BLOCKS = 5  # 5 ms: attack from unity to any depth, finished before t
 _HOLD_BLOCKS = 10  # 10 ms: longer than a pitch period, so the gain does not ripple
 _RELEASE_BLOCKS = 100  # 100 ms: the gain rises by at most 1.0 over this span
 _UNITY_VOLUME = 50
+_TRIM_FRAME_S = 0.010  # trim measurement frame
+_TRIM_THRESHOLD = 10.0 ** (-50.0 / 20.0)  # -50 dBFS peak
+_TRIM_MARGIN_S = 0.020  # kept around the audible part so consonants are not cut
 
 
 def time_stretch(samples: npt.NDArray[np.float32], rate: float) -> npt.NDArray[np.float32]:
-    """Change speed without changing pitch (``rate`` 1.5 = 1.5x faster); 1.0 is the identity."""
-    if rate == 1.0:
+    """Change speed without changing pitch (``rate`` 1.5 = 1.5x faster); 1.0 is the identity.
+
+    Empty input (an all-silent chunk after ``trim_edges``) is returned unchanged.
+    """
+    if rate == 1.0 or len(samples) == 0:
         return samples
     stretched = pytsmod.wsola(samples, 1.0 / rate)
     return np.asarray(stretched, dtype=np.float32)
+
+
+def trim_edges(samples: npt.NDArray[np.float32], sample_rate: int) -> npt.NDArray[np.float32]:
+    """Cut leading and trailing near-silence, keeping a 20 ms margin; all-silent gives empty.
+
+    A 10 ms frame is audible when its peak is above -50 dBFS (peak, not RMS, so a short quiet
+    consonant is never dropped). Non-finite samples count as silence.
+    """
+    frame = max(1, round(sample_rate * _TRIM_FRAME_S))
+    magnitude = np.nan_to_num(np.abs(samples), nan=0.0, posinf=0.0, neginf=0.0)
+    count = -(-len(magnitude) // frame)
+    padded = np.zeros(count * frame, dtype=magnitude.dtype)
+    padded[: len(magnitude)] = magnitude
+    audible = np.flatnonzero(padded.reshape(count, frame).max(axis=1) > _TRIM_THRESHOLD)
+    if len(audible) == 0:
+        return samples[:0]
+    margin = round(sample_rate * _TRIM_MARGIN_S)
+    start = max(0, int(audible[0]) * frame - margin)
+    end = min(len(samples), (int(audible[-1]) + 1) * frame + margin)
+    return samples[start:end]
+
+
+def fade_edges(
+    samples: npt.NDArray[np.float32], sample_rate: int, fade_s: float = 0.005
+) -> npt.NDArray[np.float32]:
+    """Linear fade in and out (default 5 ms) so cuts do not click; first and last sample are 0."""
+    if len(samples) == 0:
+        return samples
+    length = min(max(1, round(sample_rate * fade_s)), max(1, len(samples) // 2))
+    ramp = np.arange(length, dtype=np.float32) / np.float32(length)
+    out = samples.astype(np.float32, copy=True)
+    out[:length] *= ramp
+    out[-length:] *= ramp[::-1]
+    return out
 
 
 def gain(volume: int) -> float:

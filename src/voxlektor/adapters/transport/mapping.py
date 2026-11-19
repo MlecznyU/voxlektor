@@ -69,6 +69,7 @@ def to_command(req: wire.Request) -> Command:
             group=req.group,
             tag=req.tag,
             preempt=req.preempt,
+            steps=req.steps,
         )
     if isinstance(req, _OWNED_REQUESTS):
         return _OWNED[type(req)](owner=req.owner)

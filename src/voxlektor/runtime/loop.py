@@ -186,10 +186,12 @@ class CoreLoop:
         self, effect: StartPlayback | PausePlayback | ResumePlayback | AbortPlayback
     ) -> Callable[[], None]:
         match effect:
-            case StartPlayback(chunk):
+            case StartPlayback(chunk, lead_s):
                 audio = self._buffers.take(chunk)
                 self._last_started = chunk
-                return lambda: self._output.start(chunk, audio.samples, audio.sample_rate)
+                return lambda: self._output.start(
+                    chunk, audio.samples, audio.sample_rate, lead_s=lead_s
+                )
             case PausePlayback():
                 return self._output.pause
             case ResumePlayback():

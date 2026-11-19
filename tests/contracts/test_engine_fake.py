@@ -11,7 +11,7 @@ REF = VoiceRef("v1", Path("/voices/v1/ref.wav"), "reference transcript")
 
 
 def test_engine_api_version() -> None:
-    assert ENGINE_API == 1
+    assert ENGINE_API == 2  # 2 (0.3.0): synthesize(..., *, rate, steps); EngineSpec.api
 
 
 def test_fake_engine_passes_the_contract_suite() -> None:
@@ -27,7 +27,38 @@ def test_spec_describes_the_fake() -> None:
         sample_rate=16000,
         langs=frozenset({"pl", "en"}),
         capabilities=frozenset({Capability.LIVE, Capability.CLONE}),
+        api=2,
     )
+    assert EngineSpec("x", "r", 1, 1, frozenset(), frozenset()).api == 1  # older engines
+
+
+def test_rate_capability_value() -> None:
+    assert Capability.RATE == "rate"
+
+
+def test_fake_with_native_rate_passes_the_contract_suite() -> None:
+    engine = FakeEngine(native_rate=True)
+    assert Capability.RATE in engine.spec.capabilities
+    run_engine_contract(engine, REF)
+
+
+def test_native_rate_shortens_the_audio_and_options_are_recorded() -> None:
+    engine = FakeEngine(sample_rate=1000, seconds_per_char=0.01, native_rate=True)
+    engine.load()
+    prompt = engine.prepare_voice(REF)
+    plain = list(engine.synthesize("a" * 300, "en", prompt))
+    fast = list(engine.synthesize("a" * 300, "en", prompt, rate=1.5, steps=8))
+    assert sum(len(c.samples) for c in plain) == 3000
+    assert sum(len(c.samples) for c in fast) == 2000
+    assert engine.synth_options == [(1.0, None), (1.5, 8)]
+
+
+def test_without_native_rate_the_rate_is_ignored() -> None:
+    engine = FakeEngine(sample_rate=1000, seconds_per_char=0.01)
+    engine.load()
+    chunks = list(engine.synthesize("a" * 300, "en", engine.prepare_voice(REF), rate=1.5))
+    assert sum(len(c.samples) for c in chunks) == 3000
+    assert engine.synth_options == [(1.5, None)]
 
 
 def test_synthesize_yields_float32_mono_sine_of_the_expected_length() -> None:

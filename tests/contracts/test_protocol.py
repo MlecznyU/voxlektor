@@ -118,6 +118,19 @@ def test_speak_volume_out_of_range_is_invalid_argument(volume: bytes) -> None:
     assert err.code is ErrorCode.invalid_argument
 
 
+def test_speak_steps_decodes() -> None:
+    req = decode_request(b'{"v":1,"id":"1","cmd":"speak","text":"x","steps":8}')
+    assert isinstance(req, SpeakRequest)
+    assert req.steps == 8
+    assert SpeakRequest(v=1, id="1", text="x").steps is None
+
+
+@pytest.mark.parametrize("steps", [b"3", b"33", b"8.5", b'"8"', b"true"])
+def test_speak_steps_out_of_range_is_invalid_argument(steps: bytes) -> None:
+    err = _fail(b'{"v":1,"id":"1","cmd":"speak","text":"x","steps":%s}' % steps)
+    assert err.code is ErrorCode.invalid_argument
+
+
 def test_speak_queue_fields_decode() -> None:
     req = decode_request(
         b'{"v":1,"id":"1","cmd":"speak","text":"x","owner":"a.b:c-1","group":"g","tag":"t",'

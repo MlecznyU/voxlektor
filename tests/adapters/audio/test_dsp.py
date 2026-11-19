@@ -2,7 +2,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from voxlektor.adapters.audio.dsp import gain, level, time_stretch
+from voxlektor.adapters.audio.dsp import fade_edges, gain, level, time_stretch, trim_edges
 
 _SR = 16000
 _LEVEL_SR = 24000
@@ -184,7 +184,82 @@ def test_faster_rate_shortens_audio() -> None:
     assert abs(len(out) - _SR / 1.5) <= 0.05 * _SR / 1.5
 
 
+def test_empty_input_is_returned_unchanged_at_any_rate() -> None:
+    # An all-silent chunk is trimmed to nothing before the stretch; pytsmod raises on empty.
+    empty = np.zeros(0, dtype=np.float32)
+    out = time_stretch(empty, 1.5)
+    assert out is empty
+
+
 def test_slower_rate_lengthens_audio() -> None:
     out = time_stretch(_tone(), 0.75)
     assert out.dtype == np.float32
     assert abs(len(out) - _SR / 0.75) <= 0.05 * _SR / 0.75
+
+
+def _padded(lead_s: float, body: _Samples, tail_s: float) -> _Samples:
+    lead = np.zeros(round(_SR * lead_s), dtype=np.float32)
+    tail = np.zeros(round(_SR * tail_s), dtype=np.float32)
+    return np.concatenate([lead, body, tail])
+
+
+def test_trim_cuts_silence_to_tone_plus_margin() -> None:
+    tone = _tone(0.5)
+    out = trim_edges(_padded(1.0, tone, 1.0), _SR)
+    assert out.dtype == np.float32
+    margin = round(_SR * 0.02)
+    assert len(tone) + 2 * margin - 0.011 * _SR <= len(out) <= len(tone) + 2 * margin + 0.011 * _SR
+    assert np.array_equal(out[margin + 160 : -margin - 160], tone[160:-160])
+
+
+def test_trim_all_silent_is_empty() -> None:
+    out = trim_edges(np.full(_SR, 1e-5, dtype=np.float32), _SR)
+    assert len(out) == 0
+    assert out.dtype == np.float32
+
+
+def test_trim_empty_input() -> None:
+    assert len(trim_edges(np.zeros(0, dtype=np.float32), _SR)) == 0
+
+
+def test_trim_without_silence_keeps_length() -> None:
+    tone = _tone(0.5)
+    assert len(trim_edges(tone, _SR)) == len(tone)
+
+
+def test_trim_keeps_quiet_burst_near_the_edge() -> None:
+    burst = (10.0 ** (-40.0 / 20.0) * _tone(0.03) / 0.3).astype(np.float32)
+    signal = _padded(0.5, burst, 0.5)
+    tone_end = np.concatenate([signal, _tone(0.3)])
+    out = trim_edges(tone_end, _SR)
+    assert np.max(np.abs(out[: round(_SR * 0.06)])) > 0.009
+    only = trim_edges(signal, _SR)
+    assert 0 < len(only) < len(signal)
+    assert np.max(np.abs(only)) == pytest.approx(np.max(np.abs(burst)))
+
+
+def test_trim_handles_non_finite_as_silence() -> None:
+    samples = np.full(_SR, np.nan, dtype=np.float32)
+    assert len(trim_edges(samples, _SR)) == 0
+
+
+def test_fade_zeroes_edges_and_is_monotone() -> None:
+    ones = np.ones(_SR, dtype=np.float32)
+    out = fade_edges(ones, _SR)
+    n = round(_SR * 0.005)
+    assert out.dtype == np.float32
+    assert out[0] == 0.0
+    assert out[-1] == 0.0
+    assert np.all(np.diff(out[:n]) > 0)
+    assert np.all(np.diff(out[-n:]) < 0)
+    assert np.array_equal(out[n:-n], ones[n:-n])
+    assert np.all(ones == 1.0)
+
+
+def test_fade_short_input_and_empty() -> None:
+    out = fade_edges(np.ones(3, dtype=np.float32), _SR)
+    assert out[0] == 0.0
+    assert out[-1] == 0.0
+    one = fade_edges(np.ones(1, dtype=np.float32), _SR)
+    assert one[0] == 0.0
+    assert len(fade_edges(np.zeros(0, dtype=np.float32), _SR)) == 0

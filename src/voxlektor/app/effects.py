@@ -63,9 +63,13 @@ class CancelGeneration:
 
 @dataclass(frozen=True, slots=True)
 class StartPlayback:
-    """Hand the buffered audio of ``chunk`` to the output (the buffer entry is consumed)."""
+    """Hand the buffered audio of ``chunk`` to the output (the buffer entry is consumed).
+
+    ``lead_s``: the pause before the chunk, a minimum gap (see ``AudioOutput.start``).
+    """
 
     chunk: ChunkId
+    lead_s: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

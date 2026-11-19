@@ -41,8 +41,10 @@ class _HoldFirst(MemoryOutput):
         self._open = False
         self.first_start = threading.Event()
 
-    def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
-        super().start(chunk, samples, sample_rate)
+    def start(
+        self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+    ) -> None:
+        super().start(chunk, samples, sample_rate, lead_s=lead_s)
         with self._lock:
             hold = not self._open and self._held is None
             if hold:

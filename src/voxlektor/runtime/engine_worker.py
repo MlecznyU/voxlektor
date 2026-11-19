@@ -7,8 +7,11 @@ leave it. Voice prompts are kept here, by voice name, for the current engine loa
 ``on_result``/``on_error`` are called ON THE WORKER THREAD; the caller (``runtime.loop``) passes
 callbacks that hop back onto the loop with ``call_soon_threadsafe``. A callback that raises is
 logged and never stops the worker. The result of a ``Generate`` is ``(audio, gen_seconds)``:
-the joined, time-stretched audio (then, when a ``level`` function is given, normalised and set to
-the chunk's volume) and how long it took; every other job yields ``None``.
+the joined audio and how long it took; every other job yields ``None``. The audio path is:
+synthesize (an engine with ``Capability.RATE`` gets the chunk rate when it is within 0.75..1.5,
+every other case runs at 1.0) -> ``trim`` edge silence -> time-stretch (only when the engine did
+not speak the rate itself) -> ``fade`` the edges -> ``level`` (normalise, the chunk's volume).
+``trim``/``fade``/``level`` are optional hooks wired by bootstrap (runtime knows no DSP).
 
 Epochs and cooperative cancellation: the loop thread calls ``cancel_epochs(epochs)`` for each
 ``CancelGeneration`` effect, naming exactly the epochs the Session has abandoned. The cancelled
@@ -32,7 +35,7 @@ from typing import assert_never
 from voxlektor.app.effects import Generate, LoadEngine, PrepareVoice, UnloadEngine
 from voxlektor.app.ports import EngineProvider, VoiceRepository
 from voxlektor.app.voice_prompts import get_or_build_prompt
-from voxlektor.contracts.engine import AudioChunk, Engine, VoicePrompt
+from voxlektor.contracts.engine import AudioChunk, Capability, Engine, VoicePrompt
 from voxlektor.domain.reading import Chunk
 from voxlektor.domain.types import Epoch
 
@@ -41,6 +44,11 @@ if typing.TYPE_CHECKING:
     import numpy.typing as npt
 
 _log = logging.getLogger(__name__)
+
+# A RATE engine speaks rates in this band itself; outside it, the engine runs at 1.0 and WSOLA
+# stretches (extreme native rates risk rushed or clipped speech).
+_NATIVE_RATE_MIN = 0.75
+_NATIVE_RATE_MAX = 1.5
 
 type _Job = LoadEngine | UnloadEngine | PrepareVoice | Generate
 type _Result = tuple[AudioChunk, float] | None
@@ -54,17 +62,22 @@ class _Task:
 
 
 class EngineWorker:
-    def __init__(
+    def __init__(  # noqa: PLR0913  # trim/fade are keyword-only DSP hooks wired by bootstrap
         self,
         provider: EngineProvider,
         repo: VoiceRepository,
         stretch: Callable[[npt.NDArray[np.float32], float], npt.NDArray[np.float32]],
         level: Callable[[npt.NDArray[np.float32], int, int], npt.NDArray[np.float32]] | None = None,
+        *,
+        trim: Callable[[npt.NDArray[np.float32], int], npt.NDArray[np.float32]] | None = None,
+        fade: Callable[[npt.NDArray[np.float32], int], npt.NDArray[np.float32]] | None = None,
     ) -> None:
         self._provider = provider
         self._repo = repo
         self._stretch = stretch
         self._level = level
+        self._trim = trim
+        self._fade = fade
         self._engine: Engine | None = None  # touched only on the worker thread
         self._prompts: dict[str, VoicePrompt] = {}  # likewise
         # Written on the loop thread, read on the worker thread; swapped, never mutated.
@@ -172,11 +185,29 @@ class EngineWorker:
         prompt = self._prompts.get(voice)
         if prompt is None:
             raise RuntimeError(f"no voice prompt for {voice!r}")
+        native = Capability.RATE in engine.spec.capabilities and (
+            _NATIVE_RATE_MIN <= chunk.rate <= _NATIVE_RATE_MAX
+        )
         started = time.perf_counter()
-        pieces = [piece.samples for piece in engine.synthesize(chunk.text, chunk.lang, prompt)]
+        pieces = [
+            piece.samples
+            for piece in engine.synthesize(
+                chunk.text,
+                chunk.lang,
+                prompt,
+                rate=chunk.rate if native else 1.0,
+                steps=chunk.steps,
+            )
+        ]
         joined = np.concatenate(pieces) if pieces else np.zeros(0, dtype=np.float32)
-        samples = self._stretch(joined.astype(np.float32, copy=False), chunk.rate)
+        samples = joined.astype(np.float32, copy=False)
         sample_rate = engine.spec.sample_rate
+        if self._trim is not None:  # before the stretch: no WSOLA work on edge silence
+            samples = self._trim(samples, sample_rate)
+        if not native:
+            samples = self._stretch(samples, chunk.rate)
+        if self._fade is not None:  # after the stretch, so the final edges are faded
+            samples = self._fade(samples, sample_rate)
         if self._level is not None:
             samples = self._level(samples, sample_rate, chunk.volume)
         return AudioChunk(samples, sample_rate), time.perf_counter() - started

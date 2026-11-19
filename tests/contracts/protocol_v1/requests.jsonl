@@ -3,6 +3,7 @@
 {"cmd":"speak","v":1,"id":"r13","text":"npm run dev","lang":"auto","base_lang":"en"}
 {"cmd":"speak","v":1,"id":"r14","text":"Louder, please.","volume":70}
 {"cmd":"speak","v":1,"id":"r15","text":"Silence.","voice":"m1-calm","rate":1.5,"now":true,"base_lang":"pl","volume":0}
+{"cmd":"speak","v":1,"id":"r18","text":"Quicker, please.","steps":8}
 {"cmd":"pause","v":1,"id":"r3"}
 {"cmd":"resume","v":1,"id":"r4"}
 {"cmd":"skip","v":1,"id":"r5"}

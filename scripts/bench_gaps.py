@@ -65,10 +65,12 @@ class RealtimeOutput:
         self._on_done = on_done
         self._on_failed = on_failed
 
-    def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
+    def start(
+        self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+    ) -> None:
         if not isinstance(samples, np.ndarray):
             raise TypeError(f"expected a numpy array, got {type(samples).__name__}")
-        seconds = float(samples.size) / sample_rate  # mono
+        seconds = float(samples.size) / sample_rate + lead_s  # mono; the lead as an upper bound
         with self._lock:
             self._cancel()
             self._serial += 1

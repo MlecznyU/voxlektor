@@ -49,6 +49,7 @@ def test_all_keys_are_applied() -> None:
             "base_lang": "en",
             "rate": 2,
             "volume": 80,
+            "steps": 8,
             "history": 5,
             "idle_timeout": "1h",
             "autostart": False,
@@ -62,6 +63,7 @@ def test_all_keys_are_applied() -> None:
         base_lang="en",
         rate=2.0,
         volume=80,
+        steps=8,
         history=5,
         idle_timeout_s=3600,
         autostart=False,
@@ -85,6 +87,24 @@ def test_volume_rejects(value: object) -> None:
     with pytest.raises(InvalidSetting) as info:
         merge_layers({"volume": value})
     assert info.value.message == "volume must be an integer between 0 and 100"
+
+
+def test_steps_default_is_12() -> None:
+    assert merge_layers().steps == 12
+    assert Settings().steps == 12
+
+
+def test_steps_bounds() -> None:
+    assert merge_layers({"steps": 4}).steps == 4
+    assert merge_layers({"steps": 32}).steps == 32
+    assert merge_layers({"steps": 8}, {"steps": 12}).steps == 12
+
+
+@pytest.mark.parametrize("value", [3, 33, 8.0, True, "8", None])
+def test_steps_rejects(value: object) -> None:
+    with pytest.raises(InvalidSetting) as info:
+        merge_layers({"steps": value})
+    assert info.value.message == "steps must be an integer between 4 and 32"
 
 
 def test_floor_grace_default_and_forms() -> None:

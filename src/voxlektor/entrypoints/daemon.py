@@ -35,6 +35,7 @@ import time
 from collections.abc import Generator
 from pathlib import Path
 
+from voxlektor.adapters.procs.lock_holder import lock_path as daemon_lock_path
 from voxlektor.adapters.transport.unix_client import probe
 from voxlektor.app.commands import Shutdown
 from voxlektor.app.effects import Reply
@@ -49,7 +50,6 @@ _EXIT_OK = 0
 _EXIT_ALREADY_RUNNING = 1
 _EXIT_UNAVAILABLE = 2
 _EXIT_UNSUPPORTED = 3
-_LOCK_NAME = "voxlektor.lock"
 _LOCK_WAIT_S = 5.0
 _LOCK_RETRY_S = 0.05
 _LOG_BYTES = 1_000_000
@@ -63,7 +63,7 @@ def serve(settings: Settings) -> int:
     try:
         socket_path = platform.socket_path()
         log_path = platform.log_path()
-        lock_path = platform.runtime_dir() / _LOCK_NAME
+        lock_path = daemon_lock_path(platform.runtime_dir())
     except PlatformError as err:
         print(err.message, file=sys.stderr)
         return _EXIT_UNSUPPORTED

@@ -1,9 +1,12 @@
 """The suite every engine passes (the fake always; real engines under ``-m model``)."""
 
-from voxlektor.contracts.engine import AudioChunk, Engine, VoicePrompt, VoiceRef
+from voxlektor.contracts.engine import AudioChunk, Capability, Engine, VoicePrompt, VoiceRef
 
 _TEXT = "This is a short sentence for the engine contract."
 _LENGTH_TOLERANCE = 0.10
+_FAST_RATE = 1.5
+_MIN_SPEEDUP = 1.2  # what rate 1.5 must at least achieve on the whole audio
+_STEPS = 8
 
 
 def run_engine_contract(engine: Engine, ref: VoiceRef) -> None:
@@ -25,14 +28,31 @@ def run_engine_contract(engine: Engine, ref: VoiceRef) -> None:
         f"prompt round trip changed the audio length: {direct} -> {again} samples",
     )
 
+    # Every engine takes both keywords; a RATE engine must really speak faster. The bound is
+    # looser than 1/1.5: a fixed tail (OmniVoice's ``TAIL_S``) or a pace cap (``MAX_PACE``) is
+    # not shortened by the rate, while an engine that ignores the rate still fails clearly.
+    faster = _synthesize(engine, lang, prompt, rate=_FAST_RATE, steps=_STEPS)
+    if Capability.RATE in engine.spec.capabilities:
+        _require(
+            faster <= direct / _MIN_SPEEDUP,
+            f"a RATE engine ignored rate {_FAST_RATE}: {direct} -> {faster} samples",
+        )
+
     engine.unload()
     engine.load()
     _synthesize(engine, lang, prompt)
 
 
-def _synthesize(engine: Engine, lang: str, prompt: VoicePrompt) -> int:
+def _synthesize(
+    engine: Engine,
+    lang: str,
+    prompt: VoicePrompt,
+    *,
+    rate: float = 1.0,
+    steps: int | None = None,
+) -> int:
     """Validate every chunk and return the total number of samples."""
-    chunks: list[AudioChunk] = list(engine.synthesize(_TEXT, lang, prompt))
+    chunks: list[AudioChunk] = list(engine.synthesize(_TEXT, lang, prompt, rate=rate, steps=steps))
     _require(len(chunks) >= 1, "synthesize must yield at least one chunk")
     for chunk in chunks:
         _require(chunk.samples.dtype.name == "float32", "chunks must be float32")

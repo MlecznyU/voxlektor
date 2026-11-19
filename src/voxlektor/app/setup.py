@@ -6,19 +6,41 @@ checked by the entrypoint before. Every question offers the current value as its
 Enter keeps it. Nothing is written until the end: then each value goes through
 ``SettingsStore.write_value`` and the setup is marked completed. A cancel anywhere
 (``SetupCancelled``) or a declined model license leaves the config untouched.
+
+Profiles (S3): ``run_profile_interactive`` asks one non-default profile's voice, base
+language, rate, volume, reading language and quality steps; each question shows the effective
+value and where it comes from, and "same as default" removes the profile's own value.
+``apply_profile_flags`` stores only the given profile keys (also when equal to default's) in
+any profile, creating it when missing.
+Engine, model and service stay global: they belong to ``run_interactive`` / ``apply_flags``.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 
 from voxlektor.app.ports import ModelStore, Option, Prompter, SamplePlayer, SettingsStore
 from voxlektor.contracts.engine import ModelInfo
 from voxlektor.domain.errors import DomainError, InvalidDuration, InvalidSetting
+from voxlektor.domain.profiles import (
+    DEFAULT_PROFILE,
+    PROFILE_KEYS,
+    Source,
+    resolve,
+    valid_profile_name,
+)
 from voxlektor.domain.settings import Settings, merge_layers
-from voxlektor.domain.types import Lang
+from voxlektor.domain.types import Lang, LangPref
 
 # ``Option`` is defined in ``app.ports`` (see there) and belongs to this module's surface.
-__all__ = ["Option", "SetupCancelled", "SetupResult", "apply_flags", "run_interactive"]
+__all__ = [
+    "Option",
+    "SetupCancelled",
+    "SetupResult",
+    "apply_flags",
+    "apply_profile_flags",
+    "run_interactive",
+    "run_profile_interactive",
+]
 
 _ISSUES_URL = "https://github.com/MlecznyU/voxlektor/issues"
 _SAMPLES: dict[Lang, str] = {
@@ -26,6 +48,11 @@ _SAMPLES: dict[Lang, str] = {
     "en": "Hello, this is how this voice sounds.",
 }
 _LANG_LABELS: dict[Lang, str] = {"pl": "Polish", "en": "English"}
+_READ_LANG_LABELS: dict[LangPref, str] = {
+    "auto": "detect per sentence",
+    "pl": "Polish",
+    "en": "English",
+}
 _IDLE_CHOICES = (
     ("0", "never unload the model"),
     ("5m", "unload the model after 5 minutes without reading"),
@@ -38,8 +65,19 @@ _FLAG_KEYS = frozenset(
 )
 _RATE_LOW, _RATE_HIGH = 0.5, 3.0
 _VOLUME_LOW, _VOLUME_HIGH = 0, 100
+_STEPS_LOW, _STEPS_HIGH = 4, 32
 _GB = 1_000_000_000
 _PROGRESS_STEP = 10  # percent between two progress lines
+_SAME = ":default"  # menu value of "same as default" (no voice or language is named so)
+_SET = ":set"  # menu value of "set a value for this profile"
+_ASKED = PROFILE_KEYS  # a profile run asks every profile key
+_SOURCES: dict[Source, str] = {
+    "profile": "set in this profile",
+    "default": "from default",
+    "builtin": "built-in",
+    "env": "from the environment",
+    "flag": "from an option",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,12 +148,247 @@ def apply_flags(  # noqa: PLR0913, PLR0917  # frozen interface
     if unknown:
         raise InvalidSetting(f"unknown setup option {unknown[0]!r}")
     chosen = _merge({**_typed(current), **given})
-    info = _find_engine(engines, chosen.engine)
-    if not models.is_present(info):
-        if not accept_license:
-            raise InvalidSetting("model download needs --accept-model-license")
-        models.download(info, _no_progress)
+    _ensure_present(models, _find_engine(engines, chosen.engine), accept_license)
     return _finish(store, current, chosen)
+
+
+def run_profile_interactive(
+    store: SettingsStore,
+    prompter: Prompter,
+    player: SamplePlayer,
+    voices: list[str],
+    profile: str,
+) -> SetupResult:
+    """Ask one non-default profile's voice, base language, rate, volume, reading language
+    (``lang``) and quality steps, then write it.
+
+    Each question shows the effective value and its source; "same as default" removes the
+    profile's own value. A missing profile is created (also when it stays empty). Values
+    stored in the profile that are invalid are ignored (and repaired when asked). The result
+    holds the profile's effective values; ``changed`` says whether its own values changed.
+    """
+    if profile == DEFAULT_PROFILE:
+        raise InvalidSetting("the default profile is set up by the full setup (no --profile)")
+    view = _ProfileView.load(store, profile)
+    draft = _Draft(view.base, view.base_sources, dict(view.own))
+    _ask_profile_voice(prompter, player, voices, draft)
+    _ask_profile_base_lang(prompter, draft)
+    if _same_or_set(prompter, draft, "rate", "Rate"):
+        now = draft.settings()
+        draft.values["rate"] = _ask_rate(prompter, _sample_of(player, now), now.rate, now.volume)
+    if _same_or_set(prompter, draft, "volume", "Volume"):
+        now = draft.settings()
+        sample = _sample_of(player, now)
+        draft.values["volume"] = _ask_volume(prompter, sample, now.rate, now.volume)
+    _ask_profile_lang(prompter, draft)
+    if _same_or_set(prompter, draft, "steps", "Quality steps"):
+        steps = prompter.number(
+            "Steps (4 to 32; fewer = faster)", _STEPS_LOW, _STEPS_HIGH, draft.settings().steps
+        )
+        draft.values["steps"] = round(steps)
+    settings = draft.settings()  # validates before anything is written
+    unset = [key for key in _ASKED if key in view.stored and key not in draft.values]
+    changed = _save_profile(store, profile, view.own, draft.values, unset)
+    return SetupResult(_profile_texts(settings), changed)
+
+
+def apply_profile_flags(  # noqa: PLR0913, PLR0917  # the frozen apply_flags plus the profile
+    store: SettingsStore,
+    models: ModelStore,
+    engines: list[ModelInfo],
+    current: Settings,
+    profile: str,
+    flags: Mapping[str, object],
+    accept_license: bool,
+) -> SetupResult:
+    """Store only the given profile keys (``None`` = not given) in ``profile``, creating it.
+
+    A key equal to default's value is still stored (an explicit pin). Engine and service
+    keys are global and refused here. The model of the current engine must be present, or is
+    downloaded with ``accept_license``; then the setup is marked completed.
+    """
+    given = {key: value for key, value in flags.items() if value is not None}
+    unknown = sorted(set(given) - set(PROFILE_KEYS))
+    if unknown:
+        raise InvalidSetting(f"{unknown[0]!r} is not a profile setting")
+    view = _ProfileView.load(store, profile)
+    after = {**view.own, **given}
+    settings = _merge({**_profile_layer(view.base), **after})
+    _ensure_present(models, _find_engine(engines, current.engine), accept_license)
+    changed = _save_profile(store, profile, view.own, after, ())
+    store.mark_setup_completed()
+    return SetupResult(_profile_texts(settings), changed)
+
+
+@dataclass(frozen=True, slots=True)
+class _ProfileView:
+    """What a profile run starts from (the file's values only, never the env's)."""
+
+    base: Settings  # the default profile's effective values: what "same as default" gives
+    base_sources: Mapping[str, Source]
+    own: dict[str, object]  # the profile's valid own values
+    stored: Collection[str]  # every key the profile stores, valid or not
+
+    @staticmethod
+    def load(store: SettingsStore, profile: str) -> "_ProfileView":
+        if not valid_profile_name(profile):
+            raise InvalidSetting(
+                f"invalid profile name {profile!r}; use a-z, 0-9, '-' and '_' (at most 32, "
+                "starting with a letter or digit)"
+            )
+        tables = store.read_profiles()
+        valid = {name: _valid_values(table) for name, table in tables.items()}
+        base, sources = resolve(
+            profile=DEFAULT_PROFILE, profiles=valid, globals_={}, env={}, flags={}
+        )
+        own = valid.get(profile, {})
+        return _ProfileView(base, sources, own, frozenset(tables.get(profile, {})))
+
+
+@dataclass(frozen=True, slots=True)
+class _Draft:
+    """A profile's own values while its questions are answered."""
+
+    base: Settings
+    base_sources: Mapping[str, Source]
+    values: dict[str, object]
+
+    def settings(self) -> Settings:
+        return _merge({**_profile_layer(self.base), **self.values})
+
+    def now(self, key: str) -> str:
+        """``now 1.1, set in this profile``: the effective value and where it comes from."""
+        value = _profile_texts(self.settings())[key]
+        source: Source = "profile" if key in self.values else self.base_sources[key]
+        return f"now {value}, {_SOURCES[source]}"
+
+    def take(self, key: str, answer: str, value: object) -> None:
+        if answer == _SAME:
+            self.values.pop(key, None)
+        else:
+            self.values[key] = value
+
+
+def _ask_profile_voice(
+    prompter: Prompter, player: SamplePlayer, voices: list[str], draft: _Draft
+) -> None:
+    if not voices:
+        raise InvalidSetting("no voice is installed")
+    same = Option(_SAME, f"same as default ({draft.base.voice})")
+    options = [same, *(Option(name, name) for name in voices)]
+    candidate = next((name for name in voices if name == draft.values.get("voice")), _SAME)
+    while True:
+        question = f"Voice ({draft.now('voice')}; you will hear a sample)"
+        candidate = prompter.choose(question, options, candidate)
+        draft.take("voice", candidate, candidate)
+        now = draft.settings()
+        _sample_of(player, now).play(now.rate, now.volume)
+        if prompter.confirm(f"Keep the voice {now.voice}?", default=True):
+            return
+
+
+def _ask_profile_base_lang(prompter: Prompter, draft: _Draft) -> None:
+    base = draft.base.base_lang
+    options = [Option(_SAME, f"same as default ({base}: {_LANG_LABELS[base]})")]
+    options += [Option(lang, f"{lang}: {label}") for lang, label in _LANG_LABELS.items()]
+    default = str(draft.values.get("base_lang", _SAME))
+    answer = prompter.choose(f"Base language ({draft.now('base_lang')})", options, default)
+    draft.take("base_lang", answer, "en" if answer == "en" else "pl")
+
+
+def _ask_profile_lang(prompter: Prompter, draft: _Draft) -> None:
+    options = [Option(_SAME, f"same as default ({draft.base.lang})")]
+    options += [Option(lang, f"{lang}: {label}") for lang, label in _READ_LANG_LABELS.items()]
+    default = str(draft.values.get("lang", _SAME))
+    answer = prompter.choose(f"Reading language ({draft.now('lang')})", options, default)
+    draft.take("lang", answer, answer)
+
+
+def _same_or_set(prompter: Prompter, draft: _Draft, key: str, title: str) -> bool:
+    """Ask whether ``key`` follows default or gets its own value; True for its own value."""
+    what = title.lower() if title.endswith("s") else f"a {title.lower()}"
+    options = [
+        Option(_SAME, f"same as default ({_profile_texts(draft.base)[key]})"),
+        Option(_SET, f"set {what} for this profile"),
+    ]
+    default = _SET if key in draft.values else _SAME
+    answer = prompter.choose(f"{title} ({draft.now(key)})", options, default)
+    if answer == _SAME:
+        draft.values.pop(key, None)
+        return False
+    return True
+
+
+def _sample_of(player: SamplePlayer, settings: Settings) -> "_Sample":
+    lang = settings.base_lang
+    return _Sample(player, _SAMPLES[lang], settings.voice, lang)
+
+
+def _valid_values(table: Mapping[str, object]) -> dict[str, object]:
+    """A profile table's profile keys whose values are valid (others are skipped)."""
+    valid: dict[str, object] = {}
+    for key, value in table.items():
+        if key in PROFILE_KEYS and _invalid(key, value) is None:
+            valid[key] = value
+    return valid
+
+
+def _invalid(key: str, value: object) -> str | None:
+    try:
+        merge_layers({key: value})
+    except InvalidSetting as err:
+        return err.message
+    return None
+
+
+def _save_profile(
+    store: SettingsStore,
+    profile: str,
+    before: Mapping[str, object],
+    after: Mapping[str, object],
+    unset: Collection[str],
+) -> bool:
+    """Create the profile, write the keys that are new or changed, drop ``unset``.
+
+    True when the profile's own (valid) values differ from before.
+    """
+    old, new = _overlay_texts(before), _overlay_texts(after)
+    store.create_profile(profile)
+    for key, value in new.items():
+        if old.get(key) != value:
+            store.write_profile_value(profile, key, value)
+    for key in unset:
+        store.unset_profile_value(profile, key)
+    return old != new
+
+
+def _profile_layer(settings: Settings) -> dict[str, object]:
+    return {
+        "voice": settings.voice,
+        "lang": settings.lang,
+        "base_lang": settings.base_lang,
+        "rate": settings.rate,
+        "volume": settings.volume,
+        "steps": settings.steps,
+    }
+
+
+def _profile_texts(settings: Settings) -> dict[str, str]:
+    """The profile keys as ``write_profile_value`` strings."""
+    return {key: str(value) for key, value in _profile_layer(settings).items()}
+
+
+def _overlay_texts(overlay: Mapping[str, object]) -> dict[str, str]:
+    texts = _profile_texts(_merge(overlay))
+    return {key: texts[key] for key in PROFILE_KEYS if key in overlay}
+
+
+def _ensure_present(models: ModelStore, info: ModelInfo, accept_license: bool) -> None:
+    if models.is_present(info):
+        return
+    if not accept_license:
+        raise InvalidSetting("model download needs --accept-model-license")
+    models.download(info, _no_progress)
 
 
 @dataclass(frozen=True, slots=True)

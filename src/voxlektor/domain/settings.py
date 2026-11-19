@@ -13,6 +13,8 @@ _LANGS: tuple[LangPref, ...] = ("auto", "pl", "en")
 _RATE_MIN = 0.5
 _RATE_MAX = 3.0
 _VOLUME_MAX = 100
+_STEPS_MIN = 4
+_STEPS_MAX = 32
 _DEFAULT_ENGINE = EngineId("omnivoice")
 _DEFAULT_VOICE = VoiceName("v0-default")
 
@@ -30,6 +32,7 @@ class Settings:
     history: int = 20
     ahead: int = 2
     floor_grace_s: int = 8
+    steps: int = 12  # diffusion steps per chunk (S2); last, so positional order is unchanged
 
 
 def parse_duration(s: str) -> int:
@@ -65,6 +68,15 @@ def _rate(value: object) -> float:
 def _volume(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= _VOLUME_MAX:
         raise InvalidSetting(f"volume must be an integer between 0 and {_VOLUME_MAX}")
+    return value
+
+
+def _steps(value: object) -> int:
+    message = f"steps must be an integer between {_STEPS_MIN} and {_STEPS_MAX}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidSetting(message)
+    if not _STEPS_MIN <= value <= _STEPS_MAX:
+        raise InvalidSetting(message)
     return value
 
 
@@ -109,7 +121,7 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
     base_lang = base.base_lang
     rate, volume, idle_timeout_s = base.rate, base.volume, base.idle_timeout_s
     autostart, history = base.autostart, base.history
-    floor_grace_s = base.floor_grace_s
+    floor_grace_s, steps = base.floor_grace_s, base.steps
     for key, value in merged.items():
         match key:
             case "engine":
@@ -122,8 +134,10 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
                 base_lang = _base_lang(value)
             case "rate":
                 rate = _rate(value)
-            case "volume":
-                volume = _volume(value)
+            case "volume" | "steps":
+                volume, steps = (
+                    (_volume(value), steps) if key == "volume" else (volume, _steps(value))
+                )
             case "history":
                 history = _positive_int(key, value)
             case "idle_timeout" | "floor_grace":
@@ -146,4 +160,5 @@ def merge_layers(*layers: Mapping[str, object]) -> Settings:
         autostart=autostart,
         floor_grace_s=floor_grace_s,
         history=history,
+        steps=steps,
     )

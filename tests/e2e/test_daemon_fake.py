@@ -36,10 +36,12 @@ class _SignalOutput(MemoryOutput):
         self.first_start = threading.Event()
         self.samples: list[object] = []
 
-    def start(self, chunk: ChunkId, samples: object, sample_rate: int) -> None:
+    def start(
+        self, chunk: ChunkId, samples: object, sample_rate: int, *, lead_s: float = 0.0
+    ) -> None:
         self.samples.append(samples)
         self.first_start.set()
-        super().start(chunk, samples, sample_rate)
+        super().start(chunk, samples, sample_rate, lead_s=lead_s)
 
 
 @dataclass

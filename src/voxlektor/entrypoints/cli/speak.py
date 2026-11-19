@@ -4,10 +4,13 @@ The text is the arguments joined with spaces, or the file given with ``-f`` (a r
 stdin when it is not a terminal. Files and stdin are read bounded: more than ``MAX_FRAME`` bytes
 is ``text too long`` (exit 1) before any client is built or daemon started. Text that
 ``split_text`` turns into nothing prints ``nothing to read`` and exits 0 without touching the
-socket. Every request carries the effective voice, language, base language, rate and volume (flag >
-env > config > defaults), so a changed config or ``VOXLEKTOR_*`` value applies to the next reading
-without restarting the daemon. With ``service.autostart = false`` the text is read in this process
-(``entrypoints.oneshot``, imported only on that path because it loads the engine stack).
+socket. Every request carries the effective voice, language, base language, rate, volume and steps
+(flag > ``--profile NAME``'s own keys > env > the ``default`` profile > defaults; an unknown
+profile is exit
+1 before any request), so a changed config or ``VOXLEKTOR_*`` value applies to the
+next reading without restarting the daemon. With ``service.autostart = false`` the text is read
+in this process (``entrypoints.oneshot``, imported only on that path because it loads the engine
+stack).
 
 Speaking is gated on setup: until ``vxl setup`` has completed (the store's marker), any text,
 from any source and also in one-shot mode, exits 1 with ``voxlektor is not set up yet; run: vxl
@@ -25,7 +28,7 @@ from typing import Annotated, TextIO
 
 import typer
 
-from voxlektor.bootstrap.client import build_client
+from voxlektor.bootstrap.client import build_profile_client
 from voxlektor.contracts.protocol import MAX_FRAME
 from voxlektor.domain.errors import DomainError
 from voxlektor.domain.text.chunking import split_text
@@ -63,13 +66,21 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
     as_json: Annotated[
         bool, typer.Option("--json", help="Print the daemon's reply data as one JSON line.")
     ] = False,
+    steps: Annotated[
+        int | None, typer.Option("--steps", help="Diffusion steps, 4 to 32; fewer = faster.")
+    ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option("--profile", metavar="NAME", help="Read with this profile's settings."),
+    ] = None,
 ) -> int:
     """Read text aloud (the default command)."""
     content = _resolve_text(text or [], file)
     if not split_text(content):
         print(NOTHING_TO_READ)
         return EXIT_OK
-    ctx = build_client({"voice": voice, "lang": lang, "rate": rate, "volume": volume})
+    flags = {"voice": voice, "lang": lang, "rate": rate, "volume": volume, "steps": steps}
+    ctx = build_profile_client(profile, flags)
     if not ctx.store.setup_completed():
         raise DomainError("not_set_up", "voxlektor is not set up yet; run: vxl setup")
     if not ctx.settings.autostart:
@@ -91,6 +102,7 @@ def say(  # noqa: PLR0913, PLR0917  # one parameter per frozen CLI option
         rate=settings.rate,
         now=now,
         volume=settings.volume,
+        steps=settings.steps,
         **extra,
     )
     if as_json:

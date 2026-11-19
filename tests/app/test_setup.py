@@ -5,7 +5,14 @@ from dataclasses import replace
 import pytest
 
 from voxlektor.app.ports import Option
-from voxlektor.app.setup import SetupCancelled, SetupResult, apply_flags, run_interactive
+from voxlektor.app.setup import (
+    SetupCancelled,
+    SetupResult,
+    apply_flags,
+    apply_profile_flags,
+    run_interactive,
+    run_profile_interactive,
+)
 from voxlektor.contracts.engine import ModelInfo
 from voxlektor.domain.errors import InvalidSetting, ServiceUnavailable
 from voxlektor.domain.settings import Settings
@@ -415,3 +422,315 @@ def test_invalid_flags_are_setting_errors_and_write_nothing(flags: dict[str, obj
         _flags(flags, store=store, accept=True)
     assert store.writes == []
     assert store.completed is False
+
+
+# ---------------------------------------------------------------- one profile, interactive
+
+SAME = ":default"  # the menu value of "same as default"
+SET = ":set"  # the menu value of "set a value for this profile"
+
+
+def _profile(
+    prompter: ScriptedPrompter,
+    store: InMemorySettingsStore,
+    *,
+    player: FakeSamplePlayer | None = None,
+    profile: str = "claude",
+    voices: list[str] | None = None,
+) -> SetupResult:
+    return run_profile_interactive(
+        store,
+        prompter,
+        player if player is not None else FakeSamplePlayer(),
+        VOICES if voices is None else voices,
+        profile,
+    )
+
+
+def test_profile_questions_show_the_effective_value_and_its_source() -> None:
+    store = InMemorySettingsStore(
+        {"rate": 1.2, "engine": "omnivoice"}, profiles={"claude": {"voice": "m1-warm"}}
+    )
+    prompter = ScriptedPrompter()  # Enter everywhere
+    result = _profile(prompter, store)
+    questions = _questions(prompter)
+    kinds = [kind for kind, _, _ in prompter.asked]
+    assert kinds == ["choose", "confirm", "choose", "choose", "choose", "choose", "choose"]
+    assert questions[0] == "Voice (now m1-warm, set in this profile; you will hear a sample)"
+    assert questions[2] == "Base language (now pl, built-in)"
+    assert questions[3] == "Rate (now 1.2, from default)"
+    assert questions[4] == "Volume (now 50, built-in)"
+    assert questions[5] == "Reading language (now auto, built-in)"
+    assert questions[6] == "Quality steps (now 12, built-in)"
+    assert prompter.options[4] == [
+        Option(SAME, "same as default (auto)"),
+        Option("auto", "auto: detect per sentence"),
+        Option("pl", "pl: Polish"),
+        Option("en", "en: English"),
+    ]
+    assert prompter.options[5] == [
+        Option(SAME, "same as default (12)"),
+        Option(SET, "set quality steps for this profile"),
+    ]
+    assert prompter.options[0] == [
+        Option(SAME, "same as default (v0-default)"),
+        *[Option(voice, voice) for voice in VOICES],
+    ]
+    assert prompter.options[1][0] == Option(SAME, "same as default (pl: Polish)")
+    assert prompter.options[2] == [
+        Option(SAME, "same as default (1.2)"),
+        Option(SET, "set a rate for this profile"),
+    ]
+    assert [default for _, _, default in prompter.asked] == [
+        "m1-warm",
+        True,
+        SAME,
+        SAME,
+        SAME,
+        SAME,
+        SAME,
+    ]
+    assert result == SetupResult(
+        {
+            "voice": "m1-warm",
+            "lang": "auto",
+            "base_lang": "pl",
+            "rate": "1.2",
+            "volume": "50",
+            "steps": "12",
+        },
+        changed=False,
+    )
+    assert store.profile_writes == []
+    assert store.writes == []
+    assert store.completed is False  # the global setup is not this run's business
+
+
+def test_same_as_default_removes_the_profile_values() -> None:
+    own: dict[str, object] = {"voice": "m1-warm", "rate": 1.5, "steps": 8, "lang": "en"}
+    store = InMemorySettingsStore(profiles={"claude": own})
+    player = FakeSamplePlayer()
+    prompter = ScriptedPrompter([SAME, True, ENTER, SAME, ENTER, SAME, ENTER, ENTER])
+    result = _profile(prompter, store, player=player)
+    assert prompter.asked[3][2] == SET  # the rate had a profile value
+    assert prompter.asked[5][2] == "en"  # so had the language
+    assert prompter.asked[6][2] == SET  # and the steps: Enter keeps them
+    assert prompter.asked[7] == ("number", "Steps (4 to 32; fewer = faster)", 8)
+    assert store.profiles["claude"] == {"steps": 8}
+    assert result.values["voice"] == "v0-default"
+    assert result.values["rate"] == "1.0"
+    assert result.changed is True
+    assert player.played == [(PL_SAMPLE, "v0-default", "pl", 1.5, 50)]  # the rate it had then
+
+
+def test_setting_values_writes_only_those_keys_even_when_equal_to_default() -> None:
+    store = InMemorySettingsStore({"voice": "f1-calm"}, profiles={"claude": {}})
+    player = FakeSamplePlayer()
+    answers = ["f1-calm", True, "en", SET, 1.3, True, SET, 80, False, 70, True]
+    result = _profile(ScriptedPrompter(answers), store, player=player)
+    assert store.profile_writes == [
+        ("claude", "voice", "f1-calm"),  # an explicit pin, although default has the same voice
+        ("claude", "base_lang", "en"),
+        ("claude", "rate", "1.3"),
+        ("claude", "volume", "70"),
+    ]
+    assert store.writes == []
+    assert result.changed is True
+    assert player.played == [
+        (PL_SAMPLE, "f1-calm", "pl", 1.0, 50),
+        (EN_SAMPLE, "f1-calm", "en", 1.3, 50),
+        (EN_SAMPLE, "f1-calm", "en", 1.3, 80),
+        (EN_SAMPLE, "f1-calm", "en", 1.3, 70),
+    ]
+
+
+def test_a_missing_profile_is_created_empty() -> None:
+    store = InMemorySettingsStore()
+    result = _profile(ScriptedPrompter(), store, profile="audiobook")
+    assert store.profiles == {"audiobook": {}}
+    assert result.changed is False
+
+
+def test_profile_voice_loop_and_a_profile_voice_no_longer_installed() -> None:
+    store = InMemorySettingsStore(profiles={"claude": {"voice": "gone"}})
+    player = FakeSamplePlayer()
+    prompter = ScriptedPrompter(["f1-calm", False, "m1-warm", True])
+    result = _profile(prompter, store, player=player)
+    assert prompter.asked[0][2] == SAME  # the stored voice is not offered
+    assert prompter.asked[0][1] == "Voice (now gone, set in this profile; you will hear a sample)"
+    assert prompter.asked[2][1] == (
+        "Voice (now f1-calm, set in this profile; you will hear a sample)"
+    )
+    assert prompter.asked[2][2] == "f1-calm"
+    assert [voice for _, voice, _, _, _ in player.played] == ["f1-calm", "m1-warm"]
+    assert result.values["voice"] == "m1-warm"
+
+
+def test_invalid_stored_profile_values_are_ignored_and_repaired() -> None:
+    store = InMemorySettingsStore(
+        profiles={"claude": {"rate": 9.0, "lang": "de", "steps": 99, "voice": 7}}
+    )
+    prompter = ScriptedPrompter([ENTER, True, ENTER, SAME])
+    result = _profile(prompter, store)
+    assert prompter.asked[3][1] == "Rate (now 1.0, built-in)"
+    assert prompter.asked[5][1] == "Reading language (now auto, built-in)"
+    assert prompter.asked[6][1] == "Quality steps (now 12, built-in)"
+    assert store.profiles["claude"] == {}  # every asked key is repaired
+    assert result.changed is False
+
+
+def test_profile_language_and_steps_can_be_set() -> None:
+    store = InMemorySettingsStore({"steps": 16}, profiles={"claude": {}})
+    answers = [ENTER, True, ENTER, SAME, SAME, "en", SET, 8.4]
+    result = _profile(ScriptedPrompter(answers), store)
+    assert store.profile_writes == [("claude", "lang", "en"), ("claude", "steps", "8")]
+    assert result.values["lang"] == "en"
+    assert result.values["steps"] == "8"
+    assert result.changed is True
+
+
+def test_out_of_range_profile_steps_are_rejected_before_writing() -> None:
+    store = InMemorySettingsStore()
+    with pytest.raises(InvalidSetting, match="steps"):
+        _profile(ScriptedPrompter([ENTER, True, ENTER, SAME, SAME, SAME, SET, 40]), store)
+    assert store.profiles == {}
+
+
+def test_profile_setup_needs_voices() -> None:
+    with pytest.raises(InvalidSetting, match="no voice"):
+        _profile(ScriptedPrompter(), InMemorySettingsStore(), voices=[])
+
+
+@pytest.mark.parametrize("name", ["default", "Bad Name", ""])
+def test_profile_setup_refuses_default_and_invalid_names(name: str) -> None:
+    store = InMemorySettingsStore()
+    with pytest.raises(InvalidSetting):
+        _profile(ScriptedPrompter(), store, profile=name)
+    assert store.profiles == {}
+
+
+def test_cancel_in_a_profile_question_writes_nothing() -> None:
+    store = InMemorySettingsStore(profiles={"claude": {"rate": 1.5}})
+    with pytest.raises(SetupCancelled):
+        _profile(ScriptedPrompter([SAME, True, SetupCancelled()]), store)
+    assert store.profiles == {"claude": {"rate": 1.5}}
+    assert store.profile_writes == []
+
+
+def test_out_of_range_profile_rate_is_rejected_before_writing() -> None:
+    store = InMemorySettingsStore()
+    with pytest.raises(InvalidSetting, match="rate"):
+        _profile(ScriptedPrompter([ENTER, True, ENTER, SET, 9.0, True]), store)
+    assert store.profiles == {}
+
+
+# ---------------------------------------------------------------- one profile, flag mode
+
+
+def _profile_flags(  # noqa: PLR0913  # keyword-only overrides of the defaults
+    flags: dict[str, object],
+    *,
+    store: InMemorySettingsStore | None = None,
+    models: FakeModelStore | None = None,
+    accept: bool = False,
+    profile: str = "claude",
+    current: Settings = CURRENT,
+) -> SetupResult:
+    return apply_profile_flags(
+        store if store is not None else InMemorySettingsStore(),
+        models if models is not None else FakeModelStore(present=["omnivoice", "fake"]),
+        [FAKE, OMNI],
+        current,
+        profile,
+        flags,
+        accept,
+    )
+
+
+def test_profile_flags_create_the_profile_and_store_only_the_given_keys() -> None:
+    store = InMemorySettingsStore({"rate": 1.2})
+    flags: dict[str, object] = {"voice": "v0-default", "rate": 1.0, "volume": None, "steps": 8}
+    result = _profile_flags(flags, store=store)
+    assert store.profile_writes == [
+        ("claude", "voice", "v0-default"),  # equal to the built-in default, still stored
+        ("claude", "rate", "1.0"),  # the built-in value, over default's 1.2
+        ("claude", "steps", "8"),
+    ]
+    assert store.writes == []
+    assert store.completed is True
+    assert result.values == {
+        "voice": "v0-default",
+        "lang": "auto",
+        "base_lang": "pl",
+        "rate": "1.0",
+        "volume": "50",
+        "steps": "8",
+    }
+    assert result.changed is True
+
+
+def test_profile_flags_without_keys_create_an_empty_profile() -> None:
+    store = InMemorySettingsStore()
+    result = _profile_flags({"voice": None}, store=store)
+    assert store.profiles == {"claude": {}}
+    assert result.changed is False
+    assert store.completed is True
+
+
+def test_profile_flags_again_with_the_same_values_change_nothing() -> None:
+    store = InMemorySettingsStore(profiles={"claude": {"lang": "en", "rate": 1.1}})
+    result = _profile_flags({"lang": "en", "rate": 1.1}, store=store)
+    assert store.profile_writes == []
+    assert result.changed is False
+    assert result.values["lang"] == "en"
+
+
+def test_profile_flags_may_target_the_default_profile() -> None:
+    store = InMemorySettingsStore({"voice": "m1-warm"})
+    result = _profile_flags({"base_lang": "en"}, store=store, profile="default")
+    assert store.profile_writes == [("default", "base_lang", "en")]
+    assert store.profiles == {}
+    assert result.values["voice"] == "m1-warm"
+
+
+def test_profile_flags_keep_invalid_values_of_keys_not_given() -> None:
+    store = InMemorySettingsStore(profiles={"claude": {"rate": 9.0}})
+    result = _profile_flags({"volume": 30}, store=store)
+    assert store.profiles["claude"] == {"rate": 9.0, "volume": "30"}
+    assert result.values["rate"] == "1.0"
+
+
+@pytest.mark.parametrize(
+    ("flags", "message"),
+    [
+        ({"engine": "fake"}, "'engine' is not a profile setting"),
+        ({"idle_timeout": "5m"}, "'idle_timeout' is not a profile setting"),
+        ({"rate": 9.0}, "rate"),
+        ({"lang": "de"}, "lang"),
+        ({"steps": 2}, "steps"),
+    ],
+    ids=str,
+)
+def test_invalid_profile_flags_write_nothing(flags: dict[str, object], message: str) -> None:
+    store = InMemorySettingsStore()
+    with pytest.raises(InvalidSetting, match=message):
+        _profile_flags(flags, store=store, accept=True)
+    assert store.profiles == {}
+    assert store.completed is False
+
+
+def test_profile_flags_refuse_an_invalid_name() -> None:
+    store = InMemorySettingsStore()
+    with pytest.raises(InvalidSetting, match="invalid profile name 'Claude'"):
+        _profile_flags({}, store=store, profile="Claude")
+
+
+def test_profile_flags_need_the_license_for_an_absent_model() -> None:
+    store = InMemorySettingsStore()
+    models = FakeModelStore(present=[])
+    with pytest.raises(InvalidSetting, match="--accept-model-license"):
+        _profile_flags({"rate": 1.1}, store=store, models=models)
+    assert store.profiles == {}
+    result = _profile_flags({"rate": 1.1}, store=store, models=models, accept=True)
+    assert models.downloads == ["omnivoice"]
+    assert result.changed is True

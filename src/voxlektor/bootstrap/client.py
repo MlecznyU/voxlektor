@@ -8,6 +8,12 @@ whose value is ``None`` was not given and does not override anything.
 ``ClientContext.send`` returns the reply's ``data``; an error reply becomes a ``DomainError``
 carrying the wire ``code`` and message; an unreachable daemon is ``ServiceUnavailable``, and
 ``NotRunning`` (its subclass) when nobody listens on the socket at all.
+
+Hung daemon: ``ensure`` checks, when its first ping fails and before anything is spawned, whether
+the daemon lock (``voxlektor.lock``) is held. A holder that neither answers nor releases the lock
+within 15 s (the spawn timeout; a daemon starting up or finishing a stop does one of the two) is
+reported as ``ServiceUnavailable`` (``hung_message``) instead of fresh starts that each exit
+with "already running". ``hung_daemon`` names such a holder; ``stop_hung`` stops a verified one.
 """
 
 import os
@@ -21,6 +27,14 @@ from pathlib import Path
 import msgspec
 
 import voxlektor
+from voxlektor.adapters.procs.lock_holder import (
+    LockHolder,
+    Outcome,
+    find_holder,
+    lock_held,
+    lock_path,
+    terminate,
+)
 from voxlektor.adapters.procs.spawn import ensure_daemon
 from voxlektor.adapters.storage.settings_toml import TomlSettingsStore
 from voxlektor.adapters.storage.voices_fs import FsVoiceRepository
@@ -36,6 +50,8 @@ from voxlektor.domain.errors import (
     NotRunning,
     ServiceUnavailable,
 )
+from voxlektor.domain.profiles import DEFAULT_PROFILE as _DEFAULT_PROFILE
+from voxlektor.domain.profiles import Source, resolve, valid_profile_name
 from voxlektor.domain.settings import Settings, merge_layers
 from voxlektor.domain.types import Lang
 
@@ -47,6 +63,11 @@ _SAMPLE_TIMEOUT_S = 120.0
 _NOT_WARM = frozenset({"cold", "loading"})
 _GONE_WAIT_S = 5.0  # an outdated daemon removing its socket and pid file
 _GONE_POLL_S = 0.1
+# A lock holder that does not answer gets the full spawn timeout of ``ensure_daemon`` (15 s) to
+# answer or release the lock: a cold start (model, socket) or an ordinary stop (engine unload)
+# is never reported as hung; then it is, instead of 15 s of respawns that say "already running".
+_HUNG_GRACE_S = 15.0
+_HUNG_KILL_GRACE_S = 3.0  # ``vxl stop``: SIGTERM, this long, then SIGKILL
 
 # Replaced by tests (fake clock); production uses the real ones.
 _sleep = time.sleep
@@ -85,7 +106,7 @@ class ClientContext:
         status shows nothing queued or playing.
         """
         seen: list[Mapping[str, object]] = []
-        ensure_daemon(self.platform, lambda: self._ping(seen))
+        ensure_daemon(self.platform, self._first_ping(seen))
         if not work or not seen or seen[-1].get("version") == voxlektor.__version__:
             return
         if self._stop_outdated(seen[-1]):
@@ -119,6 +140,68 @@ class ClientContext:
         catalog.ensure_bundled()
         return catalog
 
+    def hung_daemon(self, grace_s: float = 0.0) -> LockHolder | None:
+        """The holder of the daemon lock when it is held but nobody answers ``status``.
+
+        None when the lock is free or a daemon answers. With ``grace_s`` the holder gets that
+        long to answer or to release the lock (it may be starting up or finishing a stop).
+        """
+        return self._silent_holder([], grace_s)
+
+    def stop_hung(self, holder: LockHolder) -> Outcome:
+        """SIGTERM, a 3 s grace, then SIGKILL for a verified holder (``lock_holder.terminate``).
+
+        An unverified or unknown holder is never signalled: ``ServiceUnavailable`` naming it.
+        Unless it survived, its pid file (when it still holds its pid) is removed.
+        """
+        lock = lock_path(self.platform.runtime_dir())
+        if holder.pid is None:
+            raise ServiceUnavailable(
+                f"cannot tell which process holds {lock}; find it with: lsof {lock}"
+            )
+        if not holder.verified:
+            raise ServiceUnavailable(
+                f"pid {holder.pid} holds {lock} but is not recognisably a voxlektor daemon; "
+                "not stopping it"
+            )
+        outcome = terminate(holder.pid, _HUNG_KILL_GRACE_S)
+        pid_path = self.platform.pid_path()
+        if outcome != "survived" and _recorded_pid(pid_path) == str(holder.pid):
+            pid_path.unlink(missing_ok=True)
+        return outcome
+
+    def _first_ping(self, seen: list[Mapping[str, object]]) -> Callable[[], bool]:
+        """``ensure_daemon``'s ping; when the first one fails, a silent lock holder is an error.
+
+        Before anything is spawned: a daemon that holds the lock but does not answer (within a
+        short grace) would only make every fresh start exit with "already running".
+        """
+        first = [True]
+
+        def ping() -> bool:
+            if self._ping(seen):
+                return True
+            if not first:
+                return False
+            first.clear()
+            holder = self._silent_holder(seen, _HUNG_GRACE_S)
+            if holder is not None:
+                raise ServiceUnavailable(hung_message(holder))
+            return bool(seen)  # it answered during the grace
+
+        return ping
+
+    def _silent_holder(self, seen: list[Mapping[str, object]], grace_s: float) -> LockHolder | None:
+        lock = lock_path(self.platform.runtime_dir())
+        deadline = _monotonic() + grace_s
+        while lock_held(lock):
+            if self._ping(seen):
+                return None
+            if _monotonic() >= deadline:
+                return find_holder(lock, self.platform.pid_path())
+            _sleep(_GONE_POLL_S)
+        return None
+
     def _ping(self, seen: list[Mapping[str, object]]) -> bool:
         """A short ``status``; the data of an answer is appended to ``seen``."""
         try:
@@ -130,6 +213,19 @@ class ClientContext:
         data = reply.get("data")
         seen.append(msgspec.convert(data, dict[str, object]) if isinstance(data, dict) else {})
         return True
+
+
+def hung_message(holder: LockHolder) -> str:
+    """What to tell the user about a daemon that holds the lock but does not answer."""
+    who = "a voxlektor daemon" if holder.pid is None else f"a voxlektor daemon (pid {holder.pid})"
+    return f"{who} holds the lock but does not answer; stop it with: vxl stop"
+
+
+def _recorded_pid(pid_path: Path) -> str | None:
+    try:
+        return pid_path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def _wait_gone(*paths: Path) -> bool:
@@ -149,6 +245,50 @@ def build_client(flags: Mapping[str, object]) -> ClientContext:
     return ClientContext(settings, platform, store, config_path)
 
 
+def resolve_settings(
+    profile: str | None, flags: Mapping[str, object]
+) -> tuple[Settings, dict[str, Source]]:
+    """The effective settings of ``profile`` and the source of every key.
+
+    Precedence: flag > the profile's own keys > ``VOXLEKTOR_*`` env > ``default`` > built-ins
+    (see ``domain.profiles.resolve``); ``None`` is the ``default`` profile, and a flag whose
+    value is ``None`` was not given. An invalid name (``InvalidSetting`` "invalid profile name
+    ...") or a profile missing from ``config.toml`` (``InvalidSetting`` "unknown profile
+    'NAME'") is a user error (exit 1).
+    """
+    _, _, store = _locate()
+    return _resolve(store, profile, flags)
+
+
+def build_profile_client(profile: str | None, flags: Mapping[str, object]) -> ClientContext:
+    """``build_client`` whose settings are ``resolve_settings(profile, flags)``."""
+    platform, config_path, store = _locate()
+    settings, _ = _resolve(store, profile, flags)
+    return ClientContext(settings, platform, store, config_path)
+
+
+def _resolve(
+    store: SettingsStore, profile: str | None, flags: Mapping[str, object]
+) -> tuple[Settings, dict[str, Source]]:
+    name = _DEFAULT_PROFILE if profile is None else profile
+    _require_valid_name(name)
+    return resolve(
+        profile=name,
+        profiles=store.read_profiles(),
+        globals_=store.read_globals(),
+        env=store.read_env(),
+        flags={key: value for key, value in flags.items() if value is not None},
+    )
+
+
+def _require_valid_name(name: str) -> None:
+    if not valid_profile_name(name):
+        raise InvalidSetting(
+            f"invalid profile name {name!r}; use a-z, 0-9, '-' and '_' (at most 32, "
+            "starting with a letter or digit)"
+        )
+
+
 def build_setup_client(warn: Callable[[str], None]) -> tuple[ClientContext, Settings]:
     """``build_client({})`` for ``vxl setup``, which is how a broken config gets repaired.
 
@@ -156,13 +296,95 @@ def build_setup_client(warn: Callable[[str], None]) -> tuple[ClientContext, Sett
     default is used) and reported through ``warn``. Also returns the setup's current values:
     the file's valid values only, never the env's (Enter in setup must not persist an env value).
     """
+    ctx, profiles = build_tolerant_client(warn)
+    return ctx, profiles.file_default
+
+
+class TolerantProfiles:
+    """Profile resolution over the valid values only (made by ``build_tolerant_client``).
+
+    ``names``: ``default`` first, then the other profiles by name. ``file_default``: the
+    ``default`` profile from the file alone (no env). ``resolve(profile)``: whether the profile
+    exists, its effective settings (profile > env > default > built-ins) and the source of
+    every key; an unknown or invalid name is not an error here: ``False`` and default's values.
+    """
+
+    def __init__(
+        self,
+        profiles: Mapping[str, Mapping[str, object]],
+        globals_: Mapping[str, object],
+        env: Mapping[str, object],
+    ) -> None:
+        self._profiles = profiles
+        self._globals = globals_
+        self._env = env
+        others = sorted(name for name in profiles if name != _DEFAULT_PROFILE)
+        self.names: tuple[str, ...] = (_DEFAULT_PROFILE, *others)
+        self.file_default, _ = resolve(
+            profile=_DEFAULT_PROFILE, profiles=profiles, globals_=globals_, env={}, flags={}
+        )
+
+    def resolve(self, profile: str | None) -> tuple[bool, Settings, dict[str, Source]]:
+        name = _DEFAULT_PROFILE if profile is None else profile
+        exists = valid_profile_name(name) and name in self.names
+        settings, sources = resolve(
+            profile=name if exists else _DEFAULT_PROFILE,
+            profiles=self._profiles,
+            globals_=self._globals,
+            env=self._env,
+            flags={},
+        )
+        return exists, settings, sources
+
+    def resolve_known(self, profile: str | None) -> tuple[Settings, dict[str, Source]]:
+        """``resolve`` for a profile that must exist: an invalid name or an unknown profile is
+        ``InvalidSetting``, as in ``resolve_settings``."""
+        name = _DEFAULT_PROFILE if profile is None else profile
+        _require_valid_name(name)
+        exists, settings, sources = self.resolve(name)
+        if not exists:
+            raise InvalidSetting(f"unknown profile {name!r}")
+        return settings, sources
+
+
+def build_tolerant_client(warn: Callable[[str], None]) -> tuple[ClientContext, TolerantProfiles]:
+    """The client of the read-only views (``setup``/``setup --check``, ``vxl profiles``,
+    ``config show``): one bad value never stops them.
+
+    Every invalid value in ``config.toml`` (globals and any profile) or in a ``VOXLEKTOR_*``
+    variable is skipped and reported once through ``warn`` (``ignoring invalid KEY in
+    config.toml: …``, ``… in profile 'NAME' of config.toml: …``, ``ignoring invalid NAME in the
+    environment: …``); the next layer's value is used. A file that is no valid TOML (or whose
+    ``[profiles]`` / ``[service]`` is no table) still raises ``InvalidSetting``. The context's
+    settings are the ``default`` profile's (env included, no flags).
+    """
     platform, config_path, store = _locate()
-    file_values: dict[str, object] = {}
-    for key, value in store.read_file().items():
+    globals_ = store.read_globals()
+    tables = store.read_profiles()
+    bad: set[tuple[str, str]] = set()  # (profile or "", key) of skipped file values
+    for key, value in store.read_file().items():  # the globals and default, in file order
         if (problem := _invalid({key: value})) is not None:
             warn(f"ignoring invalid {key} in {_CONFIG_FILE}: {problem}")
-        else:
-            file_values[key] = value
+            bad.add(("" if key in globals_ else _DEFAULT_PROFILE, key))
+    others = sorted(name for name in tables if name != _DEFAULT_PROFILE)
+    for name in others:
+        for key, value in tables[name].items():
+            if (problem := _invalid({key: value})) is not None:
+                warn(f"ignoring invalid {key} in profile {name!r} of {_CONFIG_FILE}: {problem}")
+                bad.add((name, key))
+    env = _tolerant_env(config_path, warn)
+    valid_globals = {k: v for k, v in globals_.items() if ("", k) not in bad}
+    valid_tables = {
+        name: {k: v for k, v in table.items() if (name, k) not in bad}
+        for name, table in tables.items()
+    }
+    profiles = TolerantProfiles(valid_tables, valid_globals, env)
+    _, settings, _ = profiles.resolve(None)
+    return ClientContext(settings, platform, store, config_path), profiles
+
+
+def _tolerant_env(config_path: Path, warn: Callable[[str], None]) -> dict[str, object]:
+    """The valid ``VOXLEKTOR_*`` settings; each invalid variable reported and skipped."""
     env_values: dict[str, object] = {}
     for name in sorted(os.environ):
         single = TomlSettingsStore(config_path, {name: os.environ[name]})
@@ -175,8 +397,7 @@ def build_setup_client(warn: Callable[[str], None]) -> tuple[ClientContext, Sett
             warn(f"ignoring invalid {name} in the environment: {problem}")
         else:
             env_values.update(values)
-    settings = merge_layers(file_values, env_values)
-    return ClientContext(settings, platform, store, config_path), merge_layers(file_values)
+    return env_values
 
 
 def model_store() -> ModelStore:
